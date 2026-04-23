@@ -14,6 +14,18 @@ const plugin: OpenClawPluginDefinition = {
   description:
     "LinkedIn automation via Unipile (messaging, connections, profile, Sales Navigator search) with hard-enforced daily quotas and human-like pacing.",
 
+  /**
+   * Config reload policy. The rate limiter, tool descriptions, and Unipile
+   * client are all seeded at register() time, so changes to credentials or
+   * account identity need a full restart. Pacing / limits / working hours
+   * are read on each gate() call — they hot-reload naturally once the host
+   * re-enters register(), with no client reconnection.
+   */
+  reload: {
+    restartPrefixes: ["dsn", "apiKey", "accountId", "accountTier", "enabled"],
+    hotPrefixes: ["limits", "pacing", "workingHours", "telemetry", "debug"],
+  },
+
   register(api: OpenClawPluginApi): void {
     const cfg = parseUnipileConfig(api.pluginConfig);
     const log = attachLog(api.logger, cfg.debug);
@@ -54,6 +66,34 @@ const plugin: OpenClawPluginDefinition = {
       stop: () => {
         log.info("service stop — flushing usage counters");
         limiter.flush();
+      },
+    });
+
+    // /linkedin slash command — bypasses the LLM, returns a one-screen status
+    // snapshot so an operator can see where the account stands without
+    // burning an agent turn. Useful before approving a batch or debugging
+    // why writes are blocked.
+    api.registerCommand({
+      name: "linkedin",
+      description: "Show a compact Unipile LinkedIn usage snapshot for the connected account.",
+      acceptsArgs: false,
+      handler: () => {
+        const report = limiter.report({ eventLimit: 0 });
+        const wh = report.workingHours;
+        const lines: string[] = [];
+        lines.push(`LinkedIn (${cfg.accountId}, ${describeTier(cfg.accountTier)})`);
+        lines.push(
+          `Working hours: ${wh.ok ? "open" : "closed"} (${wh.window})` +
+            (wh.nextOkAt ? ` — next open ${wh.nextOkAt}` : ""),
+        );
+        for (const [name, cat] of Object.entries(report.categories)) {
+          const w = cat.week.limit !== null ? `, week ${cat.week.remaining}/${cat.week.limit}` : "";
+          const m =
+            cat.month.limit !== null ? `, month ${cat.month.remaining}/${cat.month.limit}` : "";
+          const pacing = cat.spacingReadyAt ? ` — spacing clears ${cat.spacingReadyAt}` : "";
+          lines.push(`${name}: today ${cat.today.remaining}/${cat.today.limit}${w}${m}${pacing}`);
+        }
+        return { text: lines.join("\n") };
       },
     });
 

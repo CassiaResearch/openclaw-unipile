@@ -15,14 +15,16 @@ export interface Log {
  * `debug()` is silenced unless the plugin has debug mode enabled.
  */
 export function attachLog(host: PluginLogger, verbose: boolean): Log {
-  const debugSink = host.debug?.bind(host) ?? host.info.bind(host);
+  // If the host has no debug sink, silently drop debug lines. Falling back to
+  // host.info would leak verbose lines into info-level logs.
+  const debugSink = host.debug?.bind(host);
   const tag = (msg: string): string => `${TAG} ${msg}`;
   return {
     info: (msg) => host.info(tag(msg)),
     warn: (msg) => host.warn(tag(msg)),
     error: (msg) => host.error(tag(msg)),
     debug: (msg) => {
-      if (verbose) debugSink(tag(msg));
+      if (verbose && debugSink) debugSink(tag(msg));
     },
   };
 }

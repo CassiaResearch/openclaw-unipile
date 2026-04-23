@@ -14,6 +14,8 @@ import {
 import {
   addCategoryCount,
   addToolCount,
+  archiveEvents,
+  archiveOldDailyAggregates,
   hasDedupHash,
   loadUsage,
   nowIso,
@@ -42,6 +44,13 @@ export interface RecordSuccessOptions {
   toolName: string;
   category: RateCategory;
   cost?: number;
+  /**
+   * The cost that was reserved at gate() time. Defaults to `cost`. Only
+   * differs when the caller knows the true cost only after the call returns
+   * (e.g. search_results, which charges per returned item). Used to release
+   * the right amount of in-flight reservation.
+   */
+  reservedCost?: number;
   cooldownKey?: string;
   durationMs?: number;
   /**
@@ -56,6 +65,8 @@ export interface RecordSuccessOptions {
 export interface RecordFailureOptions {
   toolName: string;
   category: RateCategory;
+  /** Reservation made at gate() time to release. Defaults to 1. */
+  reservedCost?: number;
   cooldownKey?: string;
   durationMs?: number;
   err: unknown;
@@ -70,6 +81,7 @@ export interface CategoryUsageReport {
   today: { used: WindowUsage; limit: number; remaining: number };
   week: { used: WindowUsage; limit: number | null; remaining: number | null };
   month: { used: WindowUsage; limit: number | null; remaining: number | null };
+  inFlight: number;
   minSpacingSec: number;
   secondsUntilSpacingCleared: number;
   workingHoursOnly: boolean;
@@ -118,8 +130,16 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
   // Keep the tier in sync if the user changed it between sessions.
   state.accountTier = cfg.accountTier;
 
+  // In-flight reservations made by gate() but not yet resolved by
+  // recordSuccess/recordFailure. Included in budget checks so parallel reads
+  // can't all pass the gate at the same instant and then collectively
+  // overshoot the cap. Reset per process (not persisted — they only matter
+  // for concurrent calls).
+  const reserved: Partial<Record<RateCategory, number>> = {};
+
   const mutex = new AsyncMutex();
   let pendingPersist: ReturnType<typeof setTimeout> | null = null;
+  const pendingArchiveEvents: UsageEvent[] = [];
 
   function persistNow(): void {
     if (pendingPersist) {
@@ -127,6 +147,14 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
       pendingPersist = null;
     }
     try {
+      const archivedDates = archiveOldDailyAggregates(cfg.accountId, state);
+      if (archivedDates > 0) {
+        log.debug(`archived ${archivedDates} day(s) of aggregates to usage-history.jsonl`);
+      }
+      if (pendingArchiveEvents.length > 0) {
+        archiveEvents(cfg.accountId, pendingArchiveEvents);
+        pendingArchiveEvents.length = 0;
+      }
       saveUsage(cfg.accountId, state);
     } catch (err) {
       log.warn(`failed to persist usage: ${err instanceof Error ? err.message : String(err)}`);
@@ -140,6 +168,19 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
       persistNow();
     }, PERSIST_DEBOUNCE_MS);
     (pendingPersist as unknown as { unref?: () => void }).unref?.();
+  }
+
+  function reservedFor(category: RateCategory): number {
+    return reserved[category] ?? 0;
+  }
+
+  function addReservation(category: RateCategory, cost: number): void {
+    reserved[category] = reservedFor(category) + cost;
+  }
+
+  function releaseReservation(category: RateCategory, cost: number): void {
+    const next = reservedFor(category) - cost;
+    reserved[category] = next > 0 ? next : 0;
   }
 
   function blockingReason(
@@ -156,25 +197,26 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
     }
 
     const label = category.replace("_", " ");
+    const inFlight = reservedFor(category);
 
-    const daily = windowTotal(sumCategoryAcrossDates(state, category, 1));
+    const daily = windowTotal(sumCategoryAcrossDates(state, category, 1)) + inFlight;
     if (daily + cost > rule.dailyLimit) {
       const reset = new Date();
       reset.setUTCHours(24, 0, 0, 0);
-      return `Daily ${label} budget exhausted: ${daily}/${rule.dailyLimit} used today (cost ${cost}). Resets at ${reset.toISOString()}.`;
+      return `Daily ${label} budget exhausted: ${daily}/${rule.dailyLimit} used today (cost ${cost}${inFlight > 0 ? `, ${inFlight} in-flight` : ""}). Resets at ${reset.toISOString()}.`;
     }
 
     if (rule.weeklyLimit !== undefined) {
-      const weekly = windowTotal(sumCategoryAcrossDates(state, category, 7));
+      const weekly = windowTotal(sumCategoryAcrossDates(state, category, 7)) + inFlight;
       if (weekly + cost > rule.weeklyLimit) {
-        return `Weekly ${label} budget exhausted: ${weekly}/${rule.weeklyLimit} used in the last 7 days (cost ${cost}). Resets as old usage ages out — retry tomorrow.`;
+        return `Weekly ${label} budget exhausted: ${weekly}/${rule.weeklyLimit} used in the last 7 days (cost ${cost}). Rolling window — retry once older usage ages out (may take up to 7 days).`;
       }
     }
 
     if (rule.monthlyLimit !== undefined) {
-      const monthly = windowTotal(sumCategoryAcrossDates(state, category, 30));
+      const monthly = windowTotal(sumCategoryAcrossDates(state, category, 30)) + inFlight;
       if (monthly + cost > rule.monthlyLimit) {
-        return `Monthly ${label} budget exhausted: ${monthly}/${rule.monthlyLimit} used in the last 30 days (cost ${cost}). Resets as old usage ages out.`;
+        return `Monthly ${label} budget exhausted: ${monthly}/${rule.monthlyLimit} used in the last 30 days (cost ${cost}). Rolling window — retry once older usage ages out (may take up to 30 days).`;
       }
     }
 
@@ -198,7 +240,8 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
   }
 
   function recordEvent(event: UsageEvent): void {
-    pushEvent(state, event, cfg.telemetry.eventRingSize);
+    const evicted = pushEvent(state, event, cfg.telemetry.eventRingSize);
+    if (evicted) pendingArchiveEvents.push(evicted);
   }
 
   function buildReport(opts: { eventLimit?: number } = {}): UsageReport {
@@ -212,11 +255,12 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
       const day = sumCategoryAcrossDates(state, cat, 1);
       const week = sumCategoryAcrossDates(state, cat, 7);
       const month = sumCategoryAcrossDates(state, cat, 30);
+      const inFlight = reservedFor(cat);
       categories[cat] = {
         today: {
           used: day,
           limit: rule.dailyLimit,
-          remaining: Math.max(0, rule.dailyLimit - windowTotal(day)),
+          remaining: Math.max(0, rule.dailyLimit - windowTotal(day) - inFlight),
         },
         week: {
           used: week,
@@ -224,7 +268,7 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
           remaining:
             rule.weeklyLimit === undefined
               ? null
-              : Math.max(0, rule.weeklyLimit - windowTotal(week)),
+              : Math.max(0, rule.weeklyLimit - windowTotal(week) - inFlight),
         },
         month: {
           used: month,
@@ -232,8 +276,9 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
           remaining:
             rule.monthlyLimit === undefined
               ? null
-              : Math.max(0, rule.monthlyLimit - windowTotal(month)),
+              : Math.max(0, rule.monthlyLimit - windowTotal(month) - inFlight),
         },
+        inFlight,
         minSpacingSec: rule.minSpacingSec,
         secondsUntilSpacingCleared: minSpacingRemainingSec(
           readIsoAsMs(state.lastCallAt[cat]),
@@ -290,10 +335,20 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
         schedulePersist();
         throw new UnipileLimitError(reason);
       }
+      addReservation(category, cost);
       await jitter(cfg.pacing.jitterMinMs, cfg.pacing.jitterMaxMs);
     },
 
-    recordSuccess({ toolName, category, cost = 1, cooldownKey, durationMs, indeterminate }) {
+    recordSuccess({
+      toolName,
+      category,
+      cost = 1,
+      reservedCost,
+      cooldownKey,
+      durationMs,
+      indeterminate,
+    }) {
+      releaseReservation(category, reservedCost ?? cost);
       const date = todayUtc();
       addCategoryCount(state, date, category, { calls: cost });
       addToolCount(state, date, toolName, 1);
@@ -314,7 +369,8 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
       schedulePersist();
     },
 
-    recordFailure({ toolName, category, cooldownKey, durationMs, err }) {
+    recordFailure({ toolName, category, reservedCost = 1, cooldownKey, durationMs, err }) {
+      releaseReservation(category, reservedCost);
       const date = todayUtc();
       const iso = nowIso();
       const penalty = isRatePenalty(err);

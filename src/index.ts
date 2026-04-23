@@ -4,7 +4,7 @@ import { missingCredential, parseUnipileConfig } from "./config.js";
 import { attachLog } from "./log.js";
 import { createRateLimiter } from "./rateLimit/index.js";
 import { describeTier } from "./rateLimit/categories.js";
-import { registerAllTools, TOOL_COUNT } from "./tools/index.js";
+import { registerAllTools } from "./tools/index.js";
 
 const PLUGIN_ID = "openclaw-unipile";
 
@@ -32,7 +32,7 @@ const plugin: OpenClawPluginDefinition = {
     const client = getClient(cfg);
     const limiter = createRateLimiter(cfg, log);
 
-    registerAllTools(api, cfg, client, limiter, log);
+    const toolCount = registerAllTools(api, cfg, client, limiter, log);
 
     api.registerService({
       id: PLUGIN_ID,
@@ -46,7 +46,7 @@ const plugin: OpenClawPluginDefinition = {
     });
 
     log.info(
-      `ready — ${TOOL_COUNT} tools registered for account ${cfg.accountId} ` +
+      `ready — ${toolCount} tools registered for account ${cfg.accountId} ` +
         `(${describeTier(cfg.accountTier)}, working hours ${cfg.workingHours.start}-${cfg.workingHours.end} ${cfg.workingHours.timezone})`,
     );
   },

@@ -1,6 +1,22 @@
 import { Type } from "@sinclair/typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
-import { defineTool, runUnipileTool, type ToolContext } from "./runner.js";
+import { defineTool, runUnipileTool, textResult, type ToolContext } from "./runner.js";
+
+/**
+ * Only LinkedIn hosts are accepted for the `url` passthrough. Unipile is
+ * permissive; without this guard, an agent prompt-injected with an arbitrary
+ * URL could steer the search call at an attacker-controlled host.
+ */
+function isLinkedInSearchUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:") return false;
+    const host = u.hostname.toLowerCase();
+    return host === "linkedin.com" || host.endsWith(".linkedin.com");
+  } catch {
+    return false;
+  }
+}
 
 type RawSearchResponse = {
   items?: unknown[];
@@ -103,7 +119,13 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
 
         const body: Record<string, unknown> = {};
         if (params.url && params.url.trim()) {
-          body.url = params.url.trim();
+          const trimmed = params.url.trim();
+          if (!isLinkedInSearchUrl(trimmed)) {
+            return textResult(
+              `[unipile:linkedin_search] Refusing to search non-LinkedIn URL. 'url' must be an https://*.linkedin.com search URL.`,
+            );
+          }
+          body.url = trimmed;
         } else {
           if (params.filters) {
             Object.assign(body, params.filters);

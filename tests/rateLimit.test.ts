@@ -147,6 +147,62 @@ describe("rate limiter — gate decisions", () => {
     expect(report.categories.invitation_write?.today.used.calls).toBe(1);
   });
 
+  it("reserves budget at gate() so parallel reads can't overshoot the cap", async () => {
+    limiter = createRateLimiter(
+      makeConfig({
+        accountTier: "classic",
+        limits: { ...makeConfig().limits, profileReadsPerDay: 3 },
+      }),
+      silentLog,
+    );
+    // Three concurrent gates, all before any recordSuccess — the 4th must fail
+    // because the first three have reserved the entire daily cap.
+    await limiter.gate({ toolName: "p", category: "profile_read" });
+    await limiter.gate({ toolName: "p", category: "profile_read" });
+    await limiter.gate({ toolName: "p", category: "profile_read" });
+    await expect(limiter.gate({ toolName: "p", category: "profile_read" })).rejects.toThrow(
+      /Daily.+budget exhausted.+3\/3.+3 in-flight/,
+    );
+  });
+
+  it("reservations are released on recordSuccess and recordFailure", async () => {
+    limiter = createRateLimiter(
+      makeConfig({
+        accountTier: "classic",
+        limits: { ...makeConfig().limits, profileReadsPerDay: 2 },
+      }),
+      silentLog,
+    );
+    await limiter.gate({ toolName: "p", category: "profile_read" });
+    limiter.recordSuccess({ toolName: "p", category: "profile_read" });
+    await limiter.gate({ toolName: "p", category: "profile_read" });
+    limiter.recordFailure({ toolName: "p", category: "profile_read", err: new Error("x") });
+    // 1 persisted call + 0 in-flight = 1/2. A fresh gate should still succeed.
+    await expect(
+      limiter.gate({ toolName: "p", category: "profile_read" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("actualCost smaller than reservedCost releases the full reservation", async () => {
+    limiter = createRateLimiter(
+      makeConfig({
+        limits: { ...makeConfig().limits, searchResultsPerDay: 10 },
+      }),
+      silentLog,
+    );
+    await limiter.gate({ toolName: "s", category: "search_results", cost: 5 });
+    // Fewer results came back than reserved.
+    limiter.recordSuccess({
+      toolName: "s",
+      category: "search_results",
+      cost: 2,
+      reservedCost: 5,
+    });
+    const report = limiter.report();
+    expect(report.categories.search_results?.inFlight).toBe(0);
+    expect(report.categories.search_results?.today.used.calls).toBe(2);
+  });
+
   it("dedup block is logged as a 'blocked' event for observability", () => {
     limiter.recordBlocked({
       toolName: "msg",

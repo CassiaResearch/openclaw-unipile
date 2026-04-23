@@ -141,6 +141,7 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
           toolName,
           category,
           cost,
+          reservedCost,
           cooldownKey,
           durationMs: Date.now() - startedAt,
         });
@@ -159,6 +160,7 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
           toolName,
           category,
           cost: reservedCost,
+          reservedCost,
           cooldownKey,
           durationMs,
           indeterminate: true,
@@ -171,7 +173,14 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
       }
 
       if (!rule.bypassAll) {
-        ctx.limiter.recordFailure({ toolName, category, err, cooldownKey, durationMs });
+        ctx.limiter.recordFailure({
+          toolName,
+          category,
+          reservedCost,
+          err,
+          cooldownKey,
+          durationMs,
+        });
       }
       ctx.log.warn(`${toolName} failed: ${msg}`);
       return textResult(`[unipile:${toolName}] ${msg}`);

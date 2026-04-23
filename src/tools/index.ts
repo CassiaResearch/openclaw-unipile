@@ -11,20 +11,28 @@ import { registerSearchTools } from "./search.js";
 import { registerUsageTools } from "./usage.js";
 import type { ToolContext } from "./runner.js";
 
-export const TOOL_COUNT = 17;
-
+/** Number of registered tools from the most recent registerAllTools() call. */
 export function registerAllTools(
   api: OpenClawPluginApi,
   cfg: UnipileConfig,
   client: UnipileClient,
   limiter: RateLimiter,
   log: Log,
-): void {
+): number {
+  let count = 0;
+  const countingApi: OpenClawPluginApi = {
+    ...api,
+    registerTool: ((tool, opts) => {
+      count += 1;
+      return api.registerTool(tool, opts);
+    }) as OpenClawPluginApi["registerTool"],
+  };
   const ctx: ToolContext = { cfg, client, limiter, log };
-  registerProfileTools(api, ctx);
-  registerSearchTools(api, ctx);
-  registerMessagingTools(api, ctx);
-  registerInvitationTools(api, ctx);
-  registerRelationTools(api, ctx);
-  registerUsageTools(api, ctx);
+  registerProfileTools(countingApi, ctx);
+  registerSearchTools(countingApi, ctx);
+  registerMessagingTools(countingApi, ctx);
+  registerInvitationTools(countingApi, ctx);
+  registerRelationTools(countingApi, ctx);
+  registerUsageTools(countingApi, ctx);
+  return count;
 }

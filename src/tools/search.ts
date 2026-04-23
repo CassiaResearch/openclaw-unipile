@@ -154,9 +154,17 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
       execute: async (_id, params) => {
         const effectiveType = params.searchType ?? (salesLike ? "sales_navigator" : "classic");
 
+        // Per the Unipile OpenAPI spec for POST /linkedin/search:
+        //   query params: account_id (required), limit, cursor
+        //   body variants (anyOf): url-mode { url }; cursor-mode { cursor };
+        //     otherwise { api, category, keywords?, ...filters } where `api`
+        //     ∈ {classic, sales_navigator, recruiter} is the discriminator.
+        // The URL-mode body does NOT include `api` — the URL itself encodes
+        // which LinkedIn product variant to parse.
+        const isUrlMode = Boolean(params.url && params.url.trim());
         const body: Record<string, unknown> = {};
-        if (params.url && params.url.trim()) {
-          const trimmed = params.url.trim();
+        if (isUrlMode) {
+          const trimmed = params.url!.trim();
           if (!isLinkedInSearchUrl(trimmed)) {
             return errorResult(
               `[unipile:linkedin_search] Refusing to search non-LinkedIn URL. 'url' must be an https://*.linkedin.com search URL.`,
@@ -174,24 +182,23 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
           if (params.category) {
             body.category = params.category;
           }
+          // api is required in the body for keyword/filter searches — it's
+          // the discriminator Unipile uses to pick the right LinkedIn API.
+          // Set last so filters can't override.
+          body.api = effectiveType;
         }
-        // Pagination cursor goes in the BODY for /linkedin/search (matches
-        // the documented Unipile contract and known-working caller code).
-        // Do not put it in the query string — it's silently ignored there,
-        // which looks like pagination resetting to page 1 every call.
+        // Cursor goes in the body (matches the "Cursor" anyOf variant and
+        // known-working caller code). Unipile also accepts cursor in query,
+        // but the body placement is the documented pagination continuation.
         if (params.cursor) {
           body.cursor = params.cursor;
         }
 
-        // Unipile's /linkedin/search expects account_id as a QUERY parameter
-        // (matches linkedin_search_parameters). Putting it in the body yields
-        // `400 /account_id Required property`. `api` selects the search
-        // variant and is a query param too. Build query last so filters/url
-        // can't override these.
+        // account_id is a required QUERY param. Putting it in the body yields
+        // `400 /account_id Required property`. limit also goes in the query.
         const query: Record<string, string> = {};
         if (params.limit !== undefined) query.limit = String(params.limit);
         query.account_id = cfg.accountId;
-        query.api = effectiveType;
 
         // Reserve the largest plausible cost so concurrent searches can't
         // overshoot the daily cap: caller-requested `limit` if provided,

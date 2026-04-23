@@ -116,33 +116,53 @@ describe("linkedin_search — compact projection", () => {
     expect((parsed as unknown as { cursor: string }).cursor).toBe("c1");
   });
 
-  it("sends account_id and api as QUERY parameters, not body fields", async () => {
-    // Regression: Unipile's /linkedin/search rejects with
-    //   400 {"path":"/account_id","message":"Required property"}
-    // when account_id is in the body. Matches linkedin_search_parameters,
-    // which puts account_id in the query and works.
+  it("sends account_id in query and api in body (keyword mode)", async () => {
+    // Regression for the original bug: account_id must be a query param or
+    // Unipile rejects with `400 /account_id Required property`.
+    // Per Unipile's OpenAPI spec, `api` is the body-level discriminator
+    // between 9 body variants (Classic/SN/Recruiter × People/Companies/...),
+    // NOT a query param. An earlier over-correction put `api` in the query.
     const h = harness();
     const tool = h.tools.get("linkedin_search")!;
     await tool.execute("id-q", { keywords: "vp", searchType: "sales_navigator" });
 
     const params = h.lastQuery.params as Record<string, string>;
-    expect(params.account_id).toBe("test-account");
-    expect(params.api).toBe("sales_navigator");
-
     const body = h.lastQuery.body as Record<string, unknown>;
-    // Neither account_id nor api should be in the body — that's what caused
-    // Unipile to 400.
+
+    // account_id: query only.
+    expect(params.account_id).toBe("test-account");
     expect(body.account_id).toBeUndefined();
-    expect(body.api).toBeUndefined();
-    // The actual search content still goes in the body.
+
+    // api: body only (discriminator between anyOf body variants).
+    expect(body.api).toBe("sales_navigator");
+    expect(params.api).toBeUndefined();
+
+    // Search content in body.
     expect(body.keywords).toBe("vp");
   });
 
+  it("URL mode omits `api` from the body (URL encodes the variant)", async () => {
+    // The "Search from URL" body variant in Unipile's spec doesn't include
+    // `api` — the URL itself tells Unipile which LinkedIn product to parse.
+    // Sending api alongside a URL is redundant at best and contradictory at
+    // worst (e.g. classic URL with api=sales_navigator).
+    const h = harness();
+    const tool = h.tools.get("linkedin_search")!;
+    await tool.execute("id-u", {
+      url: "https://www.linkedin.com/search/results/people/?keywords=vp",
+      searchType: "sales_navigator",
+    });
+
+    const body = h.lastQuery.body as Record<string, unknown>;
+    expect(body.url).toMatch(/linkedin\.com/);
+    expect(body.api).toBeUndefined();
+  });
+
   it("pagination cursor goes in the body, not the query", async () => {
-    // Regression: Unipile's /linkedin/search reads `cursor` from the request
-    // body. Putting it in the query is silently ignored, which looks like
-    // pagination resetting to page 1 on every call. Match the known-working
-    // caller pattern: cursor in body, account_id/limit/api in query.
+    // Per Unipile's spec, cursor has a dedicated body variant for continuing
+    // pagination. Our earlier code put it in the query, which — though also
+    // documented — doesn't match the known-working caller pattern and risks
+    // silent page-1-only behavior if Unipile prefers body.
     const h = harness();
     const tool = h.tools.get("linkedin_search")!;
     await tool.execute("id-c", { keywords: "vp", cursor: "page-2-cursor", limit: 50 });
@@ -152,7 +172,6 @@ describe("linkedin_search — compact projection", () => {
 
     expect(body.cursor).toBe("page-2-cursor");
     expect(params.cursor).toBeUndefined();
-    // Limit stays in the query alongside account_id/api.
     expect(params.limit).toBe("50");
   });
 

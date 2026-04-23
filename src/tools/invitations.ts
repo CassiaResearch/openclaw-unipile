@@ -30,6 +30,14 @@ const SendInvitationParams = Type.Object(
         description: `Optional connection note (≤${MAX_INVITATION_MESSAGE} chars).`,
       }),
     ),
+    waitSec: Type.Optional(
+      Type.Integer({
+        minimum: 0,
+        maximum: 300,
+        description:
+          "Maximum seconds this call may sleep inside the plugin waiting for the ≥90 s spacing window to clear (default 120). Pass 0 to fail fast with errorCode='spacing' instead — useful if your harness has a short per-tool timeout or if you're orchestrating pacing yourself.",
+      }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -66,7 +74,7 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
       name: "linkedin_send_invitation",
       label: "LinkedIn: send connection invitation",
       description:
-        "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps. The call will wait up to ~120 s for the spacing window rather than fail fast, so a batch of sequential calls drains naturally. Returns `{ object: 'UserInvitationSent', invitation_id }`.",
+        "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps. By default the call waits up to 120 s for the spacing window rather than fail fast — override via `waitSec` if your harness has a short per-tool timeout. Returns `{ object: 'UserInvitationSent', invitation_id }`.",
       parameters: SendInvitationParams,
       execute: async (_id, params) => {
         // 300-char cap is enforced by the JSON schema (`maxLength`), so input
@@ -76,9 +84,9 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
         return runUnipileTool(ctx, {
           toolName: "linkedin_send_invitation",
           category: "invitation_write",
-          // ≥90 s spacing + some slack so the wait covers the full window
-          // after jitter + the current call's duration.
-          waitUpToSec: 120,
+          // Default 120 s covers the 90 s spacing plus slack; agent can lower
+          // (even to 0) to match its own orchestration / timeout budget.
+          waitUpToSec: params.waitSec ?? 120,
           run: () =>
             client.users.sendInvitation(
               compact({

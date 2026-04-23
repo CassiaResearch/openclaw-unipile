@@ -45,6 +45,50 @@ describe("gate — waitUpToSec drains naturally", () => {
     ).rejects.toThrow(/Minimum spacing/);
   });
 
+  it("waitSec=0 on linkedin_send_invitation yields a spacing errorCode, no wait", async () => {
+    // Build an invitations harness with the real tool wiring so we verify
+    // the param flows through from tool → runner → gate.
+    const { registerInvitationTools } = await import("../src/tools/invitations.js");
+    const cfg = makeConfig();
+    const limiter = createRateLimiter(cfg, silentLog);
+    const tools = new Map<string, { execute: (id: string, params: unknown) => Promise<unknown> }>();
+    const api = {
+      registerTool: (tool: {
+        name: string;
+        execute: (id: string, params: unknown) => Promise<unknown>;
+      }) => {
+        tools.set(tool.name, tool);
+      },
+    };
+    const client = {
+      users: {
+        sendInvitation: async () => ({ object: "UserInvitationSent", invitation_id: "i1" }),
+      },
+    };
+    registerInvitationTools(api as never, {
+      cfg,
+      client: client as never,
+      limiter,
+      log: silentLog,
+    });
+    const tool = tools.get("linkedin_send_invitation")!;
+
+    // First call — no spacing in play, succeeds.
+    await tool.execute("id-1", { providerId: "urn:li:member:1" });
+    // Second call immediately after — spacing active, 90 s to go. waitSec=0
+    // must reject fast rather than sleeping.
+    const start = Date.now();
+    const res = (await tool.execute("id-2", {
+      providerId: "urn:li:member:2",
+      waitSec: 0,
+    })) as { isError?: boolean; errorCode?: string };
+    const elapsed = Date.now() - start;
+    expect(res.isError).toBe(true);
+    expect(res.errorCode).toBe("spacing");
+    // Should return well under 1s even though real spacing is 90s.
+    expect(elapsed).toBeLessThan(500);
+  });
+
   it("budget exhaustion is never waited on, regardless of waitUpToSec", async () => {
     const limiter = createRateLimiter(
       makeConfig({

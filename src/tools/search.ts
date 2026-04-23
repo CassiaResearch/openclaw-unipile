@@ -183,7 +183,12 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
         if (params.limit !== undefined) query.limit = String(params.limit);
         if (params.cursor) query.cursor = params.cursor;
 
-        const reservedCost = Math.min(params.limit ?? 10, 100);
+        // Reserve the largest plausible cost so concurrent searches can't
+        // overshoot the daily cap: caller-requested `limit` if provided,
+        // otherwise 25 (Unipile's default page size when `limit` is
+        // omitted). actualCost corrects the final billing based on the
+        // number of items actually returned.
+        const reservedCost = Math.min(params.limit ?? 25, 100);
 
         return runUnipileTool(ctx, {
           toolName: "linkedin_search",

@@ -1,51 +1,18 @@
-export type AccountTier = "classic" | "sales_navigator" | "recruiter";
+import type { z } from "openclaw/plugin-sdk/zod";
+import type { UnipileConfigSchema } from "./configSchema.js";
 
-export interface UnipileLimits {
-  invitationsPerDay: number;
-  invitationsPerWeek: number;
-  invitationsPerMonth: number;
-  profileReadsPerDay: number;
-  profileReadsPerMonth: number;
-  searchResultsPerDay: number;
-  searchResultsPerMonth: number;
-  messagesPerDay: number;
-  messagesPerMonth: number;
-  defaultPerDay: number;
-  defaultPerMonth: number;
-}
+/**
+ * Shared runtime types for the plugin. Most config-shape types are inferred
+ * directly from the Zod schema so we have one source of truth.
+ */
 
-export interface UnipilePacing {
-  jitterMinMs: number;
-  jitterMaxMs: number;
-  invitationMinSpacingSec: number;
-  pollingCooldownHours: number;
-}
-
-export interface UnipileTelemetry {
-  eventRingSize: number;
-}
-
-export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
-
-export interface UnipileWorkingHours {
-  start: string;
-  end: string;
-  timezone: string;
-  days: Weekday[];
-}
-
-export interface UnipileConfig {
-  enabled: boolean;
-  dsn: string;
-  apiKey: string;
-  accountId: string;
-  accountTier: AccountTier;
-  limits: UnipileLimits;
-  pacing: UnipilePacing;
-  workingHours: UnipileWorkingHours;
-  telemetry: UnipileTelemetry;
-  debug: boolean;
-}
+export type UnipileConfig = z.infer<typeof UnipileConfigSchema>;
+export type AccountTier = UnipileConfig["accountTier"];
+export type UnipileLimits = UnipileConfig["limits"];
+export type UnipilePacing = UnipileConfig["pacing"];
+export type UnipileWorkingHours = UnipileConfig["workingHours"];
+export type UnipileTelemetry = UnipileConfig["telemetry"];
+export type Weekday = UnipileWorkingHours["days"][number];
 
 export type RateCategory =
   | "invitation_write"

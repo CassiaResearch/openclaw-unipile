@@ -1,6 +1,11 @@
-import type { OpenClawPluginApi, OpenClawPluginDefinition } from "openclaw/plugin-sdk/plugin-entry";
+import {
+  buildPluginConfigSchema,
+  type OpenClawPluginApi,
+  type OpenClawPluginDefinition,
+} from "openclaw/plugin-sdk/plugin-entry";
 import { getClient } from "./client.js";
 import { missingCredential, parseUnipileConfig } from "./config.js";
+import { UnipileConfigSchema } from "./configSchema.js";
 import { attachLog } from "./log.js";
 import { createRateLimiter } from "./rateLimit/index.js";
 import { describeTier } from "./rateLimit/categories.js";
@@ -15,6 +20,16 @@ const plugin: OpenClawPluginDefinition = {
     "LinkedIn automation via Unipile (messaging, connections, profile, Sales Navigator search) with hard-enforced daily quotas and human-like pacing.",
 
   /**
+   * Runtime config validator (Zod). The host reports parse issues with
+   * structured `{ path, message }` entries for nicer setup-wizard output,
+   * and we still re-parse at register() time to populate defaults.
+   * The JSON Schema block in openclaw.plugin.json is kept in sync for
+   * manifest-layer validation (the loader requires it before runtime
+   * code is reachable).
+   */
+  configSchema: buildPluginConfigSchema(UnipileConfigSchema),
+
+  /**
    * Config reload policy. The rate limiter, tool descriptions, and Unipile
    * client are all seeded at register() time, so changes to credentials or
    * account identity need a full restart. Pacing / limits / working hours
@@ -27,7 +42,11 @@ const plugin: OpenClawPluginDefinition = {
   },
 
   register(api: OpenClawPluginApi): void {
-    const cfg = parseUnipileConfig(api.pluginConfig);
+    // Deferred log attach: need cfg first to know if debug is on. Build a
+    // scratch logger for any config-parse warnings so early issues aren't
+    // swallowed.
+    const scratchLog = attachLog(api.logger, false);
+    const cfg = parseUnipileConfig(api.pluginConfig, scratchLog);
     const log = attachLog(api.logger, cfg.debug);
 
     if (!cfg.enabled) {

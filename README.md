@@ -7,7 +7,7 @@ Wraps the [`unipile-node-sdk`](https://www.npmjs.com/package/unipile-node-sdk) t
 ## Install
 
 ```bash
-openclaw plugins install copilotai-unipile \
+openclaw plugins install openclaw-unipile \
   --marketplace https://github.com/CassiaResearch/openclaw-marketplace
 ```
 
@@ -26,7 +26,7 @@ or put the values in `~/.openclaw/openclaw.json`:
 ```json
 {
   "plugins": {
-    "copilotai-unipile": {
+    "openclaw-unipile": {
       "enabled": true,
       "dsn": "https://apiXX.unipile.com:443XX",
       "apiKey": "...",

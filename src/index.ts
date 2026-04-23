@@ -6,7 +6,7 @@ import { createRateLimiter } from "./rateLimit/index.js";
 import { describeTier } from "./rateLimit/categories.js";
 import { registerAllTools, TOOL_COUNT } from "./tools/index.js";
 
-const PLUGIN_ID = "copilotai-unipile";
+const PLUGIN_ID = "openclaw-unipile";
 
 const plugin: OpenClawPluginDefinition = {
   id: PLUGIN_ID,

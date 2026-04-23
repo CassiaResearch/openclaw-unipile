@@ -1,8 +1,8 @@
 {
-  "id": "copilotai-unipile",
+  "id": "openclaw-unipile",
   "name": "Unipile LinkedIn",
   "description": "LinkedIn automation via Unipile — messaging, connections, profile, Sales Navigator search. Hard-enforced daily quotas and human-like pacing to protect the connected account.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "pluginApi": "1.0",
   "configSchema": {
     "type": "object",

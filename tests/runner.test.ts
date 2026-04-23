@@ -163,6 +163,6 @@ describe("runUnipileTool", () => {
         throw err;
       },
     });
-    expect(res.content[0]?.text).toMatch(/already connected/);
+    expect(res.content[0]?.text).toMatch(/1st-degree connection/);
   });
 });

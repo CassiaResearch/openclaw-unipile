@@ -52,14 +52,14 @@ describe("toToolError", () => {
       /requesting verification/,
     ],
     [
-      "cannot_resend_yet → invitation cooldown",
+      "cannot_resend_yet → names the pending invitation as the cause",
       { body: { status: 422, type: "errors/cannot_resend_yet" } },
-      /invitation cooldown/,
+      /pending invitation/,
     ],
     [
-      "already_connected → use send_message",
+      "already_connected → states the 1st-degree fact, no prescription",
       { body: { status: 422, type: "errors/already_connected" } },
-      /already connected/,
+      /1st-degree connection/,
     ],
     [
       "insufficient_credits → out of InMail credits",

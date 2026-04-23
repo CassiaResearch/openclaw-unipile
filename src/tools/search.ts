@@ -154,9 +154,17 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
       execute: async (_id, params) => {
         const effectiveType = params.searchType ?? (salesLike ? "sales_navigator" : "classic");
 
+        // Per the Unipile OpenAPI spec for POST /linkedin/search:
+        //   query params: account_id (required), limit, cursor
+        //   body variants (anyOf): url-mode { url }; cursor-mode { cursor };
+        //     otherwise { api, category, keywords?, ...filters } where `api`
+        //     ∈ {classic, sales_navigator, recruiter} is the discriminator.
+        // The URL-mode body does NOT include `api` — the URL itself encodes
+        // which LinkedIn product variant to parse.
+        const isUrlMode = Boolean(params.url && params.url.trim());
         const body: Record<string, unknown> = {};
-        if (params.url && params.url.trim()) {
-          const trimmed = params.url.trim();
+        if (isUrlMode) {
+          const trimmed = params.url!.trim();
           if (!isLinkedInSearchUrl(trimmed)) {
             return errorResult(
               `[unipile:linkedin_search] Refusing to search non-LinkedIn URL. 'url' must be an https://*.linkedin.com search URL.`,
@@ -174,14 +182,23 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
           if (params.category) {
             body.category = params.category;
           }
+          // api is required in the body for keyword/filter searches — it's
+          // the discriminator Unipile uses to pick the right LinkedIn API.
+          // Set last so filters can't override.
+          body.api = effectiveType;
         }
-        // Force api + account_id last so filters/url can't override them.
-        body.api = effectiveType;
-        body.account_id = cfg.accountId;
+        // Cursor goes in the body (matches the "Cursor" anyOf variant and
+        // known-working caller code). Unipile also accepts cursor in query,
+        // but the body placement is the documented pagination continuation.
+        if (params.cursor) {
+          body.cursor = params.cursor;
+        }
 
+        // account_id is a required QUERY param. Putting it in the body yields
+        // `400 /account_id Required property`. limit also goes in the query.
         const query: Record<string, string> = {};
         if (params.limit !== undefined) query.limit = String(params.limit);
-        if (params.cursor) query.cursor = params.cursor;
+        query.account_id = cfg.accountId;
 
         // Reserve the largest plausible cost so concurrent searches can't
         // overshoot the daily cap: caller-requested `limit` if provided,
@@ -200,6 +217,7 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
             const res = await client.request.send<RawSearchResponse>({
               method: "POST",
               path: ["linkedin", "search"],
+              headers: { "Content-Type": "application/json" as const },
               body,
               parameters: query,
             });

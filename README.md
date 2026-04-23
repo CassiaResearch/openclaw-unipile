@@ -63,6 +63,20 @@ All three credentials are required. Without them the plugin logs a warning and d
 
 `accountId` is never a tool parameter — the plugin injects the configured one on every call.
 
+A bundled [`unipile-linkedin` skill](skills/unipile-linkedin/SKILL.md) teaches the agent when and how to use these tools (search → dedup → personalize → invite/message), plus the error-code → recovery map in [`skills/unipile-linkedin/references/error-codes.md`](skills/unipile-linkedin/references/error-codes.md). Host harnesses that surface skills load it automatically.
+
+## Slash commands
+
+Three operator commands are registered on the gateway. They bypass the LLM and return a plain-text snapshot so you can check state without burning an agent turn.
+
+| Command                 | Args    | Output                                                                                                                                                         |
+| ----------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/linkedin`             | —       | One-screen summary: working-hours state, per-category today/week/month remaining, any active spacing countdown. Use before approving a batch.                  |
+| `/linkedin-usage`       | —       | Verbose per-category view: real `calls` vs. 429/500 `penalty` split, in-flight reservations, spacing timers, polling cooldowns. Use when you need the numbers. |
+| `/linkedin-events [N]`  | `N`     | The N most recent usage events from the ring (default 20, max 500) — tool, category, result (`ok`/`blocked`/`error`/`indeterminate`), duration, reason.        |
+
+The same data is available programmatically via the `linkedin_usage_report` tool.
+
 ## Guardrails
 
 All guardrails are hard blocks: the tool returns a readable error and does not hit Unipile.
@@ -92,7 +106,7 @@ Per-category behavior — not everything has the same guardrails:
 Details:
 
 - **Jitter**: 400–1500 ms random delay before every outbound call that hits LinkedIn.
-- **Minimum spacing**: ≥90 s between consecutive invitations.
+- **Minimum spacing**: ≥90 s between consecutive invitations. By default write tools wait up to 120 s for the spacing window to clear, emitting `details.status="waiting"` heartbeats with `secondsRemaining` / `readyAt` so harnesses keep the tool call alive. Pass `waitSec: 0` (or any override) on the tool call for fail-fast behavior.
 - **Polling cooldown**: 4 h between calls to _each_ `relation_poll` tool (tracked per tool, not per category). Calling `list_relations` does not reset the cooldown on `list_invitations_received`.
 - **Working hours**: writes (invitations, messages) blocked outside 09:00–18:00 in your configured timezone, and outside the configured working days (default Mon–Fri). Reads are always allowed.
 - **429 / 500 handling**: counted as 5× cost against the bucket and forces a longer pause.

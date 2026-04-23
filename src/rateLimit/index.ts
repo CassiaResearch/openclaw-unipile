@@ -118,6 +118,11 @@ export interface AffordabilityCheck {
   /** Why it wouldn't pass, if !ok. Matches the format `gate()` would throw. */
   blockingReason: string | null;
   /**
+   * Structured classification for the agent to branch on. Null when `ok`.
+   * Same code space as the `errorCode` field on a tool result.
+   */
+  blockingCode: "working_hours" | "budget_exhausted" | "spacing" | "cooldown" | null;
+  /**
    * Earliest time the call could be attempted. Null if currently ok.
    * Waitable blocks (spacing, cooldown) yield a near-term ISO. Hard blocks
    * (working hours, budget) yield the next boundary if known, else null.
@@ -217,16 +222,21 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
     reserved[category] = next > 0 ? next : 0;
   }
 
+  type HardBlock = { reason: string; code: "working_hours" | "budget_exhausted" };
+
   /** Blocks the caller must not wait on: working hours, budgets. */
   function hardBlockingReason(
     category: RateCategory,
     rule: CategoryRule,
     cost: number,
-  ): string | null {
+  ): HardBlock | null {
     if (rule.workingHoursOnly) {
       const wh = checkWorkingHours(cfg.workingHours, log);
       if (!wh.ok) {
-        return `Outside working hours (${wh.windowLabel}). Writes are paused until the next window.`;
+        return {
+          code: "working_hours",
+          reason: `Outside working hours (${wh.windowLabel}). Writes are paused until the next window.`,
+        };
       }
     }
 
@@ -237,25 +247,36 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
     if (daily + cost > rule.dailyLimit) {
       const reset = new Date();
       reset.setUTCHours(24, 0, 0, 0);
-      return `Daily ${label} budget exhausted: ${daily}/${rule.dailyLimit} used today (cost ${cost}${inFlight > 0 ? `, ${inFlight} in-flight` : ""}). Resets at ${reset.toISOString()}.`;
+      return {
+        code: "budget_exhausted",
+        reason: `Daily ${label} budget exhausted: ${daily}/${rule.dailyLimit} used today (cost ${cost}${inFlight > 0 ? `, ${inFlight} in-flight` : ""}). Resets at ${reset.toISOString()}.`,
+      };
     }
 
     if (rule.weeklyLimit !== undefined) {
       const weekly = windowTotal(sumCategoryAcrossDates(state, category, 7)) + inFlight;
       if (weekly + cost > rule.weeklyLimit) {
-        return `Weekly ${label} budget exhausted: ${weekly}/${rule.weeklyLimit} used in the last 7 days (cost ${cost}). Rolling window — retry once older usage ages out (may take up to 7 days).`;
+        return {
+          code: "budget_exhausted",
+          reason: `Weekly ${label} budget exhausted: ${weekly}/${rule.weeklyLimit} used in the last 7 days (cost ${cost}). Rolling window — retry once older usage ages out (may take up to 7 days).`,
+        };
       }
     }
 
     if (rule.monthlyLimit !== undefined) {
       const monthly = windowTotal(sumCategoryAcrossDates(state, category, 30)) + inFlight;
       if (monthly + cost > rule.monthlyLimit) {
-        return `Monthly ${label} budget exhausted: ${monthly}/${rule.monthlyLimit} used in the last 30 days (cost ${cost}). Rolling window — retry once older usage ages out (may take up to 30 days).`;
+        return {
+          code: "budget_exhausted",
+          reason: `Monthly ${label} budget exhausted: ${monthly}/${rule.monthlyLimit} used in the last 30 days (cost ${cost}). Rolling window — retry once older usage ages out (may take up to 30 days).`,
+        };
       }
     }
 
     return null;
   }
+
+  type SoftBlock = { waitMs: number; reason: string; code: "spacing" | "cooldown" };
 
   /**
    * Waitable blocks: spacing, polling cooldown. Returns both the ms to wait
@@ -265,7 +286,7 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
     category: RateCategory,
     rule: CategoryRule,
     cooldownKey: string,
-  ): { waitMs: number; reason: string } | null {
+  ): SoftBlock | null {
     const label = category.replace("_", " ");
 
     const spacingLeft = minSpacingRemainingSec(
@@ -274,6 +295,7 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
     );
     if (spacingLeft > 0) {
       return {
+        code: "spacing",
         waitMs: spacingLeft * 1000,
         reason: `Minimum spacing for ${label}: wait ${formatSeconds(spacingLeft)} before the next call.`,
       };
@@ -285,6 +307,7 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
     );
     if (cooldownLeft > 0) {
       return {
+        code: "cooldown",
         waitMs: cooldownLeft * 1000,
         reason: `Polling cooldown active for ${cooldownKey}: wait ${formatSeconds(cooldownLeft)} before the next call.`,
       };
@@ -390,7 +413,10 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
       const rule = rules[category];
       const key = cooldownKey ?? category;
 
-      const rejectWith = (reason: string): never => {
+      const rejectWith = (
+        reason: string,
+        code: "working_hours" | "budget_exhausted" | "spacing" | "cooldown",
+      ): never => {
         recordEvent({
           t: nowIso(),
           tool: toolName,
@@ -400,26 +426,26 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
           reason,
         });
         schedulePersist();
-        throw new UnipileLimitError(reason);
+        throw new UnipileLimitError(reason, code);
       };
 
       // Hard blocks — not waitable.
       const hard = hardBlockingReason(category, rule, cost);
-      if (hard) rejectWith(hard);
+      if (hard) rejectWith(hard.reason, hard.code);
 
       // Soft blocks — sleep if within the caller's wait budget, else reject.
       const soft = softBlock(category, rule, key);
       if (soft) {
         const waitBudgetMs = Math.max(0, waitUpToSec) * 1000;
-        if (soft.waitMs > waitBudgetMs) rejectWith(soft.reason);
+        if (soft.waitMs > waitBudgetMs) rejectWith(soft.reason, soft.code);
         await sleep(soft.waitMs);
         // Re-check hard blocks: the sleep may have crossed a working-hours
         // boundary. Re-check soft too — with the mutex serializing writes and
         // spacing only advancing on recordSuccess, this is belt-and-braces.
         const hardAgain = hardBlockingReason(category, rule, cost);
-        if (hardAgain) rejectWith(hardAgain);
+        if (hardAgain) rejectWith(hardAgain.reason, hardAgain.code);
         const softAgain = softBlock(category, rule, key);
-        if (softAgain) rejectWith(softAgain.reason);
+        if (softAgain) rejectWith(softAgain.reason, softAgain.code);
       }
 
       addReservation(category, cost);
@@ -521,23 +547,28 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
 
       // Bypass categories never block.
       if (rule.bypassAll) {
-        return { ok: true, blockingReason: null, retryAt: null, remaining };
+        return { ok: true, blockingReason: null, blockingCode: null, retryAt: null, remaining };
       }
 
       const hard = hardBlockingReason(category, rule, cost);
       if (hard) {
-        // Try to pick a useful retryAt for the common cases.
         let retryAt: string | null = null;
-        if (/Outside working hours/.test(hard)) {
+        if (hard.code === "working_hours") {
           const t = nextWorkingHoursStart(cfg.workingHours, log);
           if (t) retryAt = t.toISOString();
-        } else if (/Daily.+budget exhausted/.test(hard)) {
+        } else if (/Daily.+budget exhausted/.test(hard.reason)) {
           const reset = new Date();
           reset.setUTCHours(24, 0, 0, 0);
           retryAt = reset.toISOString();
         }
         // Weekly/monthly are rolling — no exact retryAt. Leave null.
-        return { ok: false, blockingReason: hard, retryAt, remaining };
+        return {
+          ok: false,
+          blockingReason: hard.reason,
+          blockingCode: hard.code,
+          retryAt,
+          remaining,
+        };
       }
 
       const soft = softBlock(category, rule, key);
@@ -545,12 +576,13 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
         return {
           ok: false,
           blockingReason: soft.reason,
+          blockingCode: soft.code,
           retryAt: new Date(Date.now() + soft.waitMs).toISOString(),
           remaining,
         };
       }
 
-      return { ok: true, blockingReason: null, retryAt: null, remaining };
+      return { ok: true, blockingReason: null, blockingCode: null, retryAt: null, remaining };
     },
 
     report(opts) {

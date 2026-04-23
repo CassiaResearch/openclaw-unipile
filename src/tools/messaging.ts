@@ -157,7 +157,7 @@ export function registerMessagingTools(api: OpenClawPluginApi, ctx: ToolContext)
       name: "linkedin_send_message",
       label: "LinkedIn: reply in a chat",
       description:
-        "Send a text message in an existing LinkedIn DM thread. Blocked outside working hours. Use linkedin_start_chat to initiate a new conversation.",
+        "Send a text message in an existing LinkedIn DM thread. Blocked outside working hours. Use linkedin_start_chat to initiate a new conversation. Returns `{ object: 'MessageSent', message_id }`.",
       parameters: SendMessageParams,
       execute: async (_id, params) => {
         const text = normalizeOutboundText(params.text);
@@ -175,7 +175,7 @@ export function registerMessagingTools(api: OpenClawPluginApi, ctx: ToolContext)
       name: "linkedin_start_chat",
       label: "LinkedIn: start a new chat",
       description:
-        "Start a new LinkedIn DM to one or more recipients (attendee provider_ids). Defaults to the Sales Navigator messaging API on SN/Recruiter accounts, classic otherwise. Blocked outside working hours. Setting `inmail: true` forces the classic InMail path regardless of searchType (InMail doesn't exist on the SN messaging API). `subject` is only rendered for InMails; LinkedIn silently drops it for regular DMs.",
+        "Start a new LinkedIn DM to one or more recipients (attendee provider_ids). Defaults to the Sales Navigator messaging API on SN/Recruiter accounts, classic otherwise. Blocked outside working hours. Setting `inmail: true` forces the classic InMail path regardless of searchType (InMail doesn't exist on the SN messaging API). `subject` is only rendered for InMails; LinkedIn silently drops it for regular DMs. Returns `{ object: 'ChatStarted', chat_id, message_id }`.",
       parameters: StartChatParams,
       execute: async (_id, params) => {
         // InMail only exists on the classic messaging path; if the caller asked

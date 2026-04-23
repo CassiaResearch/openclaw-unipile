@@ -1,6 +1,37 @@
 import { Type } from "@sinclair/typebox";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
-import { defineTool, runUnipileTool, textResult, type ToolContext } from "./runner.js";
+import { defineTool, errorResult, runUnipileTool, type ToolContext } from "./runner.js";
+
+/**
+ * Keys kept when the agent asks for `compact: true`. Picked for outreach
+ * decision-making: who are they, can I reach them, did I already try?
+ * Drops the verbose embedded history (education, past positions, connections
+ * count, etc.) that blows through agent context on a 100-item search.
+ */
+const COMPACT_ITEM_FIELDS = [
+  "provider_id",
+  "public_identifier",
+  "first_name",
+  "last_name",
+  "headline",
+  "location",
+  "current_position",
+  "current_company",
+  "network_distance",
+  "pending_invitation",
+  "open_profile",
+  "premium",
+] as const;
+
+function projectCompact(item: unknown): Record<string, unknown> {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return {};
+  const src = item as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of COMPACT_ITEM_FIELDS) {
+    if (src[k] !== undefined) out[k] = src[k];
+  }
+  return out;
+}
 
 /**
  * Only LinkedIn hosts are accepted for the `url` passthrough. Unipile is
@@ -75,6 +106,12 @@ const SearchParams = Type.Object(
           "Passthrough filter object. Shape varies by searchType. Common keys: 'location' (array of IDs), 'industry' ({include,exclude} arrays of IDs), 'company' ({include,exclude} of company IDs), 'network_distance' ([1,2,3]), 'role' (array of {keywords,priority,scope}), 'skills' (array of {id,priority}). Resolve human-readable names to LinkedIn IDs first via linkedin_search_parameters. `api` and `account_id` here are ignored — they are always injected from the tool context.",
       }),
     ),
+    compact: Type.Optional(
+      Type.Boolean({
+        description:
+          "When true, each result item is projected to just the outreach-relevant fields (provider_id, public_identifier, first_name, last_name, headline, location, current_position, current_company, network_distance, pending_invitation, open_profile, premium). Recommended for anything but a targeted lookup — a full 100-item LinkedIn search result is very large. Defaults to false for backwards compatibility.",
+      }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -121,8 +158,9 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
         if (params.url && params.url.trim()) {
           const trimmed = params.url.trim();
           if (!isLinkedInSearchUrl(trimmed)) {
-            return textResult(
+            return errorResult(
               `[unipile:linkedin_search] Refusing to search non-LinkedIn URL. 'url' must be an https://*.linkedin.com search URL.`,
+              "invalid_target",
             );
           }
           body.url = trimmed;
@@ -153,13 +191,18 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
           reservedCost,
           actualCost: (res: RawSearchResponse) =>
             Array.isArray(res?.items) ? res.items.length : 0,
-          run: () =>
-            client.request.send<RawSearchResponse>({
+          run: async () => {
+            const res = await client.request.send<RawSearchResponse>({
               method: "POST",
               path: ["linkedin", "search"],
               body,
               parameters: query,
-            }),
+            });
+            if (params.compact && Array.isArray(res?.items)) {
+              return { ...res, items: res.items.map(projectCompact) };
+            }
+            return res;
+          },
         });
       },
     }),
@@ -170,7 +213,7 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
       name: "linkedin_search_parameters",
       label: "LinkedIn: resolve search filter IDs",
       description:
-        "Resolve a human-readable name to the LinkedIn internal ID needed by linkedin_search filters. Call this before linkedin_search whenever you have a location / industry / company / skill name and need to filter by it — LinkedIn requires IDs, not names. Returns up to `limit` matches as `{ title, id }` objects. Counts against the default per-day budget.",
+        "Resolve a human-readable name to the LinkedIn internal ID needed by linkedin_search filters. Call this before linkedin_search whenever you have a location / industry / company / skill name and need to filter by it — LinkedIn requires IDs, not names. Returns `{ items: [{ title, id }, ...] }` with up to `limit` matches. Counts against the default per-day budget.",
       parameters: SearchParametersParams,
       execute: async (_id, params) => {
         const query: Record<string, string> = {

@@ -1,8 +1,48 @@
 import type { RateCategory } from "./types.js";
 
+/**
+ * Structured classification of any error the plugin can surface. Agents
+ * branch on this instead of regex-parsing the human-readable message.
+ *
+ * Limit codes come from our own rate limiter; the rest map to Unipile /
+ * LinkedIn error types. Kept flat and stable — new types map to existing
+ * codes until we decide they need their own.
+ */
+export type UnipileErrorCode =
+  // Our rate limiter
+  | "budget_exhausted"
+  | "spacing"
+  | "cooldown"
+  | "working_hours"
+  // Unipile / LinkedIn
+  | "rate_limit"
+  | "account_disconnected"
+  | "checkpoint"
+  | "premium_required"
+  | "account_restricted"
+  | "already_connected"
+  | "invitation_pending"
+  | "not_connected"
+  | "inmail_not_allowed"
+  | "insufficient_credits"
+  | "blocked_recipient"
+  | "invalid_target"
+  | "content_invalid"
+  | "not_found"
+  | "timeout"
+  | "network_error"
+  | "upstream_error"
+  | "unipile_error";
+
 export class UnipileLimitError extends Error {
   readonly kind = "limit" as const;
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly code: Extract<
+      UnipileErrorCode,
+      "budget_exhausted" | "spacing" | "cooldown" | "working_hours"
+    >,
+  ) {
     super(message);
     this.name = "UnipileLimitError";
   }
@@ -220,7 +260,7 @@ export function toToolError(err: unknown, toolName: string): string {
     return `Recipient is not reachable — account appears deactivated or messaging is blocked. (${toolName})`;
   }
   if (type === "errors/no_connection_with_recipient") {
-    return `The connected account is not a 1st-degree connection with this recipient, and the send was not routed as an InMail / Open-Profile message.`;
+    return `Not a 1st-degree connection and the send was not routed as an InMail / Open-Profile message.`;
   }
   if (type === "errors/resource_access_restricted") {
     return `Recipient has restricted who can message them. (${toolName})`;
@@ -287,4 +327,49 @@ export function toToolError(err: unknown, toolName: string): string {
   }
 
   return `${toolName} failed${type ? ` (${type})` : ""}: ${msg}${detail}`;
+}
+
+/**
+ * Classify a thrown error into a stable code an agent can switch on. Keep
+ * this in sync with UnipileErrorCode. Unknown shapes fall back to
+ * "unipile_error".
+ */
+export function classifyError(err: unknown): UnipileErrorCode {
+  if (err instanceof UnipileLimitError) return err.code;
+
+  const { status, type } = inspectError(err);
+
+  if (type && LOGGED_OUT_TYPES.has(type)) return "account_disconnected";
+  if (type && CHECKPOINT_TYPES.has(type)) return "checkpoint";
+  if (type && PREMIUM_MISSING_TYPES.has(type)) return "premium_required";
+  if (type === "errors/account_restricted") return "account_restricted";
+  if (type === "errors/session_mismatch") return "account_disconnected";
+
+  if (type === "errors/already_connected") return "already_connected";
+  if (type === "errors/cannot_resend_yet") return "invitation_pending";
+  if (type === "errors/cannot_invite_attendee") return "invalid_target";
+
+  if (type === "errors/blocked_recipient") return "blocked_recipient";
+  if (type === "errors/no_connection_with_recipient") return "not_connected";
+  if (type === "errors/resource_access_restricted") return "blocked_recipient";
+  if (type === "errors/not_allowed_inmail") return "inmail_not_allowed";
+  if (type === "errors/insufficient_credits") return "insufficient_credits";
+  if (type === "errors/invalid_message" || type === "errors/too_many_characters") {
+    return "content_invalid";
+  }
+  if (type === "errors/invalid_recipient") return "invalid_target";
+  if (type === "errors/user_unreachable") return "invalid_target";
+  if (type === "errors/invalid_resource_identifier") return "invalid_target";
+
+  if (type === "errors/resource_not_found" || status === 404) return "not_found";
+
+  if (type === "errors/too_many_requests" || status === 429) return "rate_limit";
+  if (type === "errors/limit_exceeded") return "rate_limit";
+  if (type === "errors/request_timeout" || status === 504) return "timeout";
+  if (type === "errors/network_down" || type === "errors/proxy_error") return "network_error";
+  if (type === "errors/provider_error" || status === 500 || status === 502 || status === 503) {
+    return "upstream_error";
+  }
+
+  return "unipile_error";
 }

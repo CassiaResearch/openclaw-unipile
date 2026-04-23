@@ -1,7 +1,13 @@
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import type { UnipileClient } from "unipile-node-sdk";
-import { UnipileLimitError, isIndeterminateSend, toToolError } from "../errors.js";
+import {
+  UnipileLimitError,
+  classifyError,
+  isIndeterminateSend,
+  toToolError,
+  type UnipileErrorCode,
+} from "../errors.js";
 import type { Log } from "../log.js";
 import type { RateLimiter } from "../rateLimit/index.js";
 import type { RateCategory, UnipileConfig } from "../types.js";
@@ -15,6 +21,12 @@ export interface ToolResult {
    * `[unipile:tool]` prefix text. Absent = success.
    */
   isError?: boolean;
+  /**
+   * Structured classification when `isError` is set. Lets the agent branch
+   * on the error class (rate_limit / not_connected / timeout / ...) without
+   * regex-parsing the free-form message text. See UnipileErrorCode.
+   */
+  errorCode?: UnipileErrorCode;
 }
 
 export interface ToolContext {
@@ -45,8 +57,12 @@ export function textResult(text: string): ToolResult {
   return { content: [{ type: "text", text }], details: null };
 }
 
-export function errorResult(text: string): ToolResult {
-  return { content: [{ type: "text", text }], details: null, isError: true };
+export function errorResult(
+  text: string,
+  errorCode: UnipileErrorCode,
+  details: unknown = null,
+): ToolResult {
+  return { content: [{ type: "text", text }], details, isError: true, errorCode };
 }
 
 function serialize(value: unknown): string {
@@ -135,7 +151,7 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
       } catch (err) {
         if (err instanceof UnipileLimitError) {
           ctx.log.warn(`${toolName} blocked: ${err.message}`);
-          return errorResult(`[unipile:${toolName}] ${err.message}`);
+          return errorResult(`[unipile:${toolName}] ${err.message}`, err.code);
         }
         throw err;
       }
@@ -177,7 +193,7 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
           indeterminate: true,
         });
         ctx.log.warn(`${toolName} indeterminate: ${msg}`);
-        return errorResult(`[unipile:${toolName}] ${msg}`);
+        return errorResult(`[unipile:${toolName}] ${msg}`, "timeout", { indeterminate: true });
       }
 
       if (!rule.bypassAll) {
@@ -191,7 +207,7 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
         });
       }
       ctx.log.warn(`${toolName} failed: ${msg}`);
-      return errorResult(`[unipile:${toolName}] ${msg}`);
+      return errorResult(`[unipile:${toolName}] ${msg}`, classifyError(err));
     }
   };
 

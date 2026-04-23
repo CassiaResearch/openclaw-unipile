@@ -56,7 +56,7 @@ export function registerProfileTools(api: OpenClawPluginApi, ctx: ToolContext): 
       name: "linkedin_get_profile",
       label: "LinkedIn: get profile",
       description:
-        "Retrieve a LinkedIn profile by public identifier slug (e.g. 'elonmusk') or provider_id. Defaults to the Sales Navigator API variant on SN/Recruiter accounts (richer data); pass searchType='classic' for the standard view. The response includes `provider_id` — useful when you only had the slug and now want to invite or message the target.",
+        "Retrieve a LinkedIn profile by public identifier slug (e.g. 'elonmusk') or provider_id. Runs any time (no working-hours gate). Defaults to the Sales Navigator API variant on SN/Recruiter accounts (richer data); pass searchType='classic' for the standard view. The response includes `provider_id` — useful when you only had the slug and now want to invite or message the target.",
       parameters: GetProfileParams,
       execute: async (_id, params) => {
         const effectiveType = params.searchType ?? (salesLike ? "sales_navigator" : "classic");

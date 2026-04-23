@@ -61,11 +61,11 @@ export function registerUsageTools(api: OpenClawPluginApi, ctx: ToolContext): vo
       name: "linkedin_usage_report",
       label: "LinkedIn: usage report",
       description:
-        "Diagnose why a linkedin_* tool is blocked, or plan a burst against the daily/weekly/monthly caps. Returns per-category usage, remaining budgets, active spacing and polling cooldowns (each with an absolute `readyAt` ISO timestamp), working-hours status with `nextOkAt`, and recent usage events. Read-only, no budget cost.",
+        "Diagnose why a linkedin_* tool is blocked, or plan a burst against the daily/weekly/monthly caps. Returns `{ workingHours: { ok, window, nextOkAt }, categories: { <cat>: { today/week/month usage+remaining, spacingReadyAt }, ... }, cooldowns: { <toolName>: { readyAt } }, recentEvents }`. Read-only, no budget cost.",
       parameters: UsageReportParams,
       execute: async (_id, params) => {
         const report = ctx.limiter.report({ eventLimit: params.eventLimit });
-        return textResult(JSON.stringify(report, null, 2));
+        return textResult(JSON.stringify(report));
       },
     }),
   );
@@ -75,7 +75,7 @@ export function registerUsageTools(api: OpenClawPluginApi, ctx: ToolContext): vo
       name: "linkedin_check_budget",
       label: "LinkedIn: pre-flight budget check",
       description:
-        "Ask whether a single call in a given category would pass right now — before actually making it. Returns `ok`, a `blockingReason` if not, a `retryAt` ISO timestamp when applicable, and per-window `remaining` headroom. Useful before planning a batch (e.g. 'can I invite 30 people today?' → call with cost=30 to see if the daily cap allows it). Read-only, no budget cost. Does NOT reserve anything.",
+        "Pre-flight: would a call of `{category, cost}` pass the gate right now? Returns `{ ok, blockingReason, blockingCode, retryAt, remaining: { today, week, month } }`. Use before a batch — e.g. 'can I send 30 invites?' → `{ category: 'invitation_write', cost: 30 }`; the response tells you whether the daily cap fits and when it resets. Read-only, no budget cost, does NOT reserve. `blockingCode` is one of working_hours / budget_exhausted / spacing / cooldown.",
       parameters: CheckBudgetParams,
       execute: async (_id, params) => {
         const result = ctx.limiter.checkAffordability({
@@ -83,7 +83,7 @@ export function registerUsageTools(api: OpenClawPluginApi, ctx: ToolContext): vo
           cost: params.cost,
           cooldownKey: params.cooldownKey,
         });
-        return textResult(JSON.stringify(result, null, 2));
+        return textResult(JSON.stringify(result));
       },
     }),
   );

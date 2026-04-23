@@ -66,7 +66,7 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
       name: "linkedin_send_invitation",
       label: "LinkedIn: send connection invitation",
       description:
-        "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps. The call will wait up to ~120 s for the spacing window rather than fail fast, so a batch of sequential calls drains naturally.",
+        "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps. The call will wait up to ~120 s for the spacing window rather than fail fast, so a batch of sequential calls drains naturally. Returns `{ object: 'UserInvitationSent', invitation_id }`.",
       parameters: SendInvitationParams,
       execute: async (_id, params) => {
         // 300-char cap is enforced by the JSON schema (`maxLength`), so input
@@ -97,7 +97,7 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
       name: "linkedin_list_invitations_sent",
       label: "LinkedIn: list sent invitations",
       description:
-        "List connection requests you've sent that are still pending. Subject to a 4 h polling cooldown to avoid automation fingerprints.",
+        "List connection requests you've sent that are still pending. Pass `limit` OR `cursor`, not both. Returns `{ items: [{ id, ...target }, ...], cursor }`. Subject to a 4 h polling cooldown.",
       parameters: PaginationParams,
       execute: async (_id, params) =>
         runUnipileTool(ctx, {
@@ -121,7 +121,7 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
       name: "linkedin_list_invitations_received",
       label: "LinkedIn: list received invitations",
       description:
-        "List pending connection requests from other users. Each item includes the shared_secret needed by linkedin_handle_invitation. Subject to a 4 h polling cooldown.",
+        "List pending connection requests from other users. Returns `{ items: [{ id, specifics: { shared_secret }, ... }, ...], cursor }` — `id` + `specifics.shared_secret` from the same item are both required by linkedin_handle_invitation. Subject to a 4 h polling cooldown.",
       parameters: PaginationParams,
       execute: async (_id, params) => {
         const query: Record<string, string> = { account_id: cfg.accountId };
@@ -147,7 +147,7 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
       name: "linkedin_handle_invitation",
       label: "LinkedIn: accept or decline a received invitation",
       description:
-        "Accept or decline a pending received invitation. Both invitationId and sharedSecret come from linkedin_list_invitations_received (items[].id and items[].specifics.shared_secret). Blocked outside working hours.",
+        "Accept or decline a pending received invitation. Pass both `invitationId` (items[].id) and `sharedSecret` (items[].specifics.shared_secret) from the same linkedin_list_invitations_received item. Blocked outside working hours.",
       parameters: HandleInvitationParams,
       execute: async (_id, params) =>
         runUnipileTool(ctx, {

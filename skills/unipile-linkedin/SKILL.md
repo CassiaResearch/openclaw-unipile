@@ -1,6 +1,6 @@
 ---
 name: unipile-linkedin
-description: LinkedIn automation via Unipile — search, connect, message, invitation workflows with hard-enforced daily/weekly/monthly caps and human-like pacing. Use when the user wants to find LinkedIn prospects, invite connections, reply to DMs, triage pending invitations, or manage outreach on the connected account.
+description: LinkedIn automation via Unipile — search, connect, profiles, message, invitation workflows with hard-enforced daily/weekly/monthly caps and human-like pacing. Use when the user wants to find LinkedIn prospects, invite connections, reply to DMs, triage pending invitations, or manage outreach on the connected account.
 metadata:
   { "openclaw": { "emoji": "💼", "requires": { "config": ["dsn", "apiKey", "accountId"] } } }
 allowed-tools:

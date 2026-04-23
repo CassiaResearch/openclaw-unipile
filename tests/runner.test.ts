@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRateLimiter } from "../src/rateLimit/index.js";
 import { runUnipileTool, type ToolContext } from "../src/tools/runner.js";
-import { cleanupStorage, makeConfig, silentLog, useTempStorage } from "./helpers.js";
+import { cleanupStorage, makeConfig, silentLog, unwrapToolText, useTempStorage } from "./helpers.js";
 
 const WED_10AM = new Date("2026-04-22T10:00:00Z");
 
@@ -32,7 +32,7 @@ describe("runUnipileTool", () => {
       category: "profile_read",
       run: async () => ({ id: "abc" }),
     });
-    expect(res.content[0]?.text).toBe(JSON.stringify({ id: "abc" }));
+    expect(unwrapToolText(res.content[0]!.text)).toBe(JSON.stringify({ id: "abc" }));
     const report = ctx.limiter.report();
     expect(report.categories.profile_read?.today.used.calls).toBe(1);
     expect(report.categories.profile_read?.inFlight).toBe(0);
@@ -116,7 +116,7 @@ describe("runUnipileTool", () => {
       category: "cached_read",
       run: async () => ({ items: [] }),
     });
-    expect(res.content[0]?.text).toBe(JSON.stringify({ items: [] }));
+    expect(unwrapToolText(res.content[0]!.text)).toBe(JSON.stringify({ items: [] }));
     const report = ctx.limiter.report();
     // cached_read is bypassAll; not represented in the report.
     expect(report.categories.cached_read).toBeUndefined();

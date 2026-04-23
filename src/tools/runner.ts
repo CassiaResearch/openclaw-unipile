@@ -1,5 +1,6 @@
 import type { Static, TSchema } from "@sinclair/typebox";
 import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
+import { wrapExternalContent } from "openclaw/plugin-sdk/security-runtime";
 import type { UnipileClient } from "unipile-node-sdk";
 import {
   UnipileLimitError,
@@ -211,7 +212,12 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
           durationMs: Date.now() - startedAt,
         });
       }
-      return textResult(serialize(result));
+      return textResult(
+        wrapExternalContent(serialize(result), {
+          source: "api",
+          sender: `linkedin via unipile (${toolName})`,
+        }),
+      );
     } catch (err) {
       const durationMs = Date.now() - startedAt;
       const msg = toToolError(err, toolName);

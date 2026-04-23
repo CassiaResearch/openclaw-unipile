@@ -62,6 +62,19 @@ export function useTempStorage(): string {
   return dir;
 }
 
+/**
+ * Strip the `wrapExternalContent` envelope applied to successful tool results
+ * in `runUnipileTool`. Returns the inner payload string (JSON or primitive)
+ * ready for `JSON.parse`. Error results and directly-constructed `textResult`
+ * payloads are not enveloped and pass through untouched.
+ */
+export function unwrapToolText(text: string): string {
+  const match = text.match(
+    /<<<EXTERNAL_UNTRUSTED_CONTENT id="[^"]+">>>\n[\s\S]*?\n---\n([\s\S]*)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="[^"]+">>>/,
+  );
+  return match ? match[1]! : text;
+}
+
 export function cleanupStorage(dir: string): void {
   setStorageHomeForTests(undefined);
   try {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRateLimiter } from "../src/rateLimit/index.js";
 import { registerSearchTools } from "../src/tools/search.js";
 import type { ToolContext } from "../src/tools/runner.js";
-import { cleanupStorage, makeConfig, silentLog, useTempStorage } from "./helpers.js";
+import { cleanupStorage, makeConfig, silentLog, unwrapToolText, useTempStorage } from "./helpers.js";
 
 const WED_10AM = new Date("2026-04-22T10:00:00Z");
 
@@ -81,7 +81,7 @@ describe("linkedin_search — compact projection", () => {
     const h = harness();
     const tool = h.tools.get("linkedin_search")!;
     const res = await tool.execute("id-1", { keywords: "vp" });
-    const parsed = JSON.parse(res.content[0]!.text) as {
+    const parsed = JSON.parse(unwrapToolText(res.content[0]!.text)) as {
       items: Array<Record<string, unknown>>;
     };
     expect(parsed.items[0]!.education).toBeDefined();
@@ -93,7 +93,7 @@ describe("linkedin_search — compact projection", () => {
     const h = harness();
     const tool = h.tools.get("linkedin_search")!;
     const res = await tool.execute("id-2", { keywords: "vp", compact: true });
-    const parsed = JSON.parse(res.content[0]!.text) as {
+    const parsed = JSON.parse(unwrapToolText(res.content[0]!.text)) as {
       items: Array<Record<string, unknown>>;
     };
     const item = parsed.items[0]!;

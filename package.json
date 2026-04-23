@@ -1,0 +1,52 @@
+{
+  "name": "@copilotai/openclaw-unipile-plugin",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OpenClaw Unipile LinkedIn plugin — messaging, connections, profile, Sales Navigator search",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "unipile",
+    "linkedin",
+    "sales-navigator",
+    "agents",
+    "plugin"
+  ],
+  "license": "MIT",
+  "author": "CopilotAI",
+  "files": [
+    "src",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.0",
+    "unipile-node-sdk": "^1.9.3"
+  },
+  "peerDependencies": {
+    "openclaw": "^2026.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "openclaw": "^2026.4.21",
+    "prettier": "^3.8.3",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
+  }
+}

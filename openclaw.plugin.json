@@ -1,0 +1,178 @@
+{
+  "id": "copilotai-unipile",
+  "name": "Unipile LinkedIn",
+  "description": "LinkedIn automation via Unipile — messaging, connections, profile, Sales Navigator search. Hard-enforced daily quotas and human-like pacing to protect the connected account.",
+  "version": "0.1.0",
+  "pluginApi": "1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "description": "Enable or disable the Unipile LinkedIn integration"
+      },
+      "dsn": {
+        "type": "string",
+        "description": "Unipile DSN URL (e.g. https://apiXX.unipile.com:443XX)"
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Unipile API access token (sent as X-API-KEY)"
+      },
+      "accountId": {
+        "type": "string",
+        "description": "Unipile account_id of the connected LinkedIn account to operate as"
+      },
+      "accountTier": {
+        "type": "string",
+        "enum": ["classic", "sales_navigator", "recruiter"],
+        "default": "sales_navigator",
+        "description": "LinkedIn plan of the connected account. Controls default search API and budgets."
+      },
+      "limits": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "invitationsPerDay": { "type": "integer", "default": 80, "minimum": 1, "maximum": 200 },
+          "invitationsPerWeek": {
+            "type": "integer",
+            "default": 200,
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Rolling 7-day cap. LinkedIn hard-caps paid accounts around 200/week."
+          },
+          "invitationsPerMonth": {
+            "type": "integer",
+            "default": 600,
+            "minimum": 1,
+            "maximum": 3000,
+            "description": "Rolling 30-day cap. Use a small number (e.g. 5) for free accounts with notes."
+          },
+          "profileReadsPerDay": {
+            "type": "integer",
+            "default": 100,
+            "minimum": 1,
+            "maximum": 2000
+          },
+          "profileReadsPerMonth": {
+            "type": "integer",
+            "default": 3000,
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "searchResultsPerDay": {
+            "type": "integer",
+            "default": 2500,
+            "minimum": 1,
+            "maximum": 5000
+          },
+          "searchResultsPerMonth": {
+            "type": "integer",
+            "default": 50000,
+            "minimum": 1,
+            "maximum": 1000000
+          },
+          "messagesPerDay": { "type": "integer", "default": 100, "minimum": 1, "maximum": 500 },
+          "messagesPerMonth": {
+            "type": "integer",
+            "default": 2000,
+            "minimum": 1,
+            "maximum": 50000,
+            "description": "For InMails (linkedin_start_chat with inmail=true), keep this at ~800 to match the free-InMail monthly quota."
+          },
+          "defaultPerDay": { "type": "integer", "default": 100, "minimum": 1, "maximum": 500 },
+          "defaultPerMonth": { "type": "integer", "default": 2000, "minimum": 1, "maximum": 50000 }
+        }
+      },
+      "pacing": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "jitterMinMs": { "type": "integer", "default": 400, "minimum": 0 },
+          "jitterMaxMs": { "type": "integer", "default": 1500, "minimum": 0 },
+          "invitationMinSpacingSec": { "type": "integer", "default": 90, "minimum": 0 },
+          "pollingCooldownHours": { "type": "integer", "default": 4, "minimum": 0 }
+        }
+      },
+      "workingHours": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "start": { "type": "string", "default": "09:00", "description": "HH:MM 24-hour" },
+          "end": { "type": "string", "default": "18:00", "description": "HH:MM 24-hour" },
+          "timezone": {
+            "type": "string",
+            "default": "system",
+            "description": "IANA timezone, or 'system' for host TZ"
+          },
+          "days": {
+            "type": "array",
+            "default": ["mon", "tue", "wed", "thu", "fri"],
+            "items": {
+              "type": "string",
+              "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+            },
+            "description": "Weekdays on which write actions (invitations, messages) are permitted. Defaults to Mon–Fri."
+          }
+        }
+      },
+      "telemetry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "eventRingSize": {
+            "type": "integer",
+            "default": 500,
+            "minimum": 0,
+            "maximum": 5000,
+            "description": "How many recent usage events to retain in usage.json for debugging / linkedin_usage_report."
+          }
+        }
+      },
+      "debug": {
+        "type": "boolean",
+        "default": false,
+        "description": "Enable verbose [unipile] debug log lines"
+      }
+    }
+  },
+  "uiHints": {
+    "enabled": { "label": "Enable Unipile LinkedIn", "help": "Turn the integration on or off" },
+    "dsn": { "label": "Unipile DSN", "help": "The full DSN URL shown in the Unipile dashboard" },
+    "apiKey": {
+      "label": "API Key",
+      "help": "Access token from Unipile dashboard",
+      "sensitive": true
+    },
+    "accountId": {
+      "label": "LinkedIn Account ID",
+      "help": "The Unipile account_id for your connected LinkedIn account"
+    },
+    "accountTier": {
+      "label": "LinkedIn Plan",
+      "help": "Picks Sales Navigator defaults and larger search budgets if available"
+    },
+    "limits": {
+      "label": "Daily limits",
+      "help": "Hard-blocked per LinkedIn account per day",
+      "advanced": true
+    },
+    "pacing": {
+      "label": "Pacing",
+      "help": "Jitter and minimum spacing between outbound calls",
+      "advanced": true
+    },
+    "workingHours": {
+      "label": "Working hours",
+      "help": "Outbound writes (invitations, messages) blocked outside this window",
+      "advanced": true
+    },
+    "telemetry": {
+      "label": "Telemetry",
+      "help": "Observability knobs for usage.json",
+      "advanced": true
+    },
+    "debug": { "label": "Debug logging", "help": "Verbose [unipile] log lines", "advanced": true }
+  }
+}

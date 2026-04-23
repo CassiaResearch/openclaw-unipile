@@ -10,8 +10,6 @@ import {
   historyPath,
   HOT_WINDOW_DAYS,
   loadUsage,
-  MAX_RECENT_SEND_KEYS,
-  pushDedupHash,
   saveUsage,
 } from "../src/rateLimit/storage.js";
 import { cleanupStorage, makeConfig, silentLog, useTempStorage } from "./helpers.js";
@@ -95,43 +93,6 @@ describe("archive — usage-history.jsonl rollover", () => {
     const p = path.join(dir, ".openclaw", "unipile", ACCOUNT, "usage.json");
     const mode = fs.statSync(p).mode & 0o777;
     expect(mode).toBe(0o600);
-  });
-});
-
-describe("dedup — LRU cap across keys", () => {
-  let dir: string;
-
-  beforeEach(() => {
-    dir = useTempStorage();
-  });
-
-  afterEach(() => {
-    cleanupStorage(dir);
-  });
-
-  it(`caps the number of distinct keys at MAX_RECENT_SEND_KEYS (${MAX_RECENT_SEND_KEYS})`, () => {
-    const state = loadUsage(ACCOUNT, { accountTier: "classic" });
-    for (let i = 0; i < MAX_RECENT_SEND_KEYS + 50; i++) {
-      pushDedupHash(state, `chat-${i}`, "hi");
-    }
-    const keys = Object.keys(state.recentSends);
-    expect(keys.length).toBe(MAX_RECENT_SEND_KEYS);
-    // The oldest 50 keys should have been dropped.
-    expect(state.recentSends["chat-0"]).toBeUndefined();
-    expect(state.recentSends[`chat-${MAX_RECENT_SEND_KEYS + 49}`]).toBeDefined();
-  });
-
-  it("re-touching a key moves it to most-recently-used", () => {
-    const state = loadUsage(ACCOUNT, { accountTier: "classic" });
-    for (let i = 0; i < MAX_RECENT_SEND_KEYS; i++) {
-      pushDedupHash(state, `chat-${i}`, "hi");
-    }
-    // Touch chat-0 again so it moves to MRU.
-    pushDedupHash(state, "chat-0", "different text");
-    // Now fill past the cap — chat-0 should survive, chat-1 (now LRU) should be evicted.
-    pushDedupHash(state, "new-chat", "hi");
-    expect(state.recentSends["chat-0"]).toBeDefined();
-    expect(state.recentSends["chat-1"]).toBeUndefined();
   });
 });
 

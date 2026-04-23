@@ -121,32 +121,6 @@ describe("persistence — budget survives a restart", () => {
     );
   });
 
-  it("dedup hashes survive restart — same text to same chat is still blocked", async () => {
-    const cfg = makeConfig();
-    const a = createRateLimiter(cfg, silentLog);
-    const ctxA: ToolContext = { cfg, client: {} as never, limiter: a, log: silentLog };
-    await runUnipileTool(ctxA, {
-      toolName: "linkedin_send_message",
-      category: "message_write",
-      dedup: { key: "msg:chat-A", payload: "Hello, friend" },
-      run: async () => ({ ok: true }),
-    });
-    a.flush();
-
-    const b = createRateLimiter(cfg, silentLog);
-    const ctxB: ToolContext = { cfg, client: {} as never, limiter: b, log: silentLog };
-    const retry = await runUnipileTool(ctxB, {
-      toolName: "linkedin_send_message",
-      category: "message_write",
-      // Different casing / whitespace — hashText normalizes these.
-      dedup: { key: "msg:chat-A", payload: "  HELLO,   friend " },
-      run: async () => {
-        throw new Error("should not be called");
-      },
-    });
-    expect(retry.content[0]?.text).toMatch(/Duplicate message detected/);
-  });
-
   it("usage.json older than HOT_WINDOW_DAYS gets archived on first flush", () => {
     const cfg = makeConfig({ accountId: "restart-acct" });
     // Seed a file with a stale day and save via the storage layer directly.

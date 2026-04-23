@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -12,15 +11,6 @@ const STORAGE_SCHEMA_VERSION = 1;
  * are evicted to usage-history.jsonl on save.
  */
 export const HOT_WINDOW_DAYS = 31;
-
-/**
- * Cap on the number of distinct dedup keys kept in memory. Prevents unbounded
- * growth for long-running accounts that send to many chats. Oldest keys are
- * dropped on insert (LRU by last-touch).
- */
-export const MAX_RECENT_SEND_KEYS = 500;
-
-const MAX_DEDUP_HASHES_PER_KEY = 100;
 
 export interface CategoryCounts {
   calls: number;
@@ -56,14 +46,6 @@ export interface UsageState {
   lastCallAt: Partial<Record<RateCategory, string>>;
   lastCooldownAt: Record<string, string>;
   events: UsageEvent[];
-  /**
-   * Hashes of recently-sent message bodies, keyed per target (chatId or
-   * sorted attendee list). Newest-first, capped at MAX_DEDUP_HASHES_PER_KEY
-   * to bound file size. Used to prevent sending the same text to the same
-   * recipient twice. The number of keys is capped at MAX_RECENT_SEND_KEYS
-   * via LRU eviction.
-   */
-  recentSends: Record<string, string[]>;
 }
 
 export interface LoadOptions {
@@ -115,7 +97,6 @@ function emptyState(accountId: string, accountTier: AccountTier): UsageState {
     lastCallAt: {},
     lastCooldownAt: {},
     events: [],
-    recentSends: {},
   };
 }
 
@@ -145,7 +126,6 @@ export function loadUsage(accountId: string, opts: LoadOptions): UsageState {
       lastCallAt: parsed.lastCallAt ?? {},
       lastCooldownAt: parsed.lastCooldownAt ?? {},
       events: parsed.events ?? [],
-      recentSends: parsed.recentSends ?? {},
     };
   } catch (err) {
     opts.onCorruption?.(err);
@@ -286,46 +266,4 @@ export function readIsoAsMs(iso: string | undefined): number | undefined {
   if (!iso) return undefined;
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? undefined : ms;
-}
-
-/**
- * SHA-256 prefix of normalized text — lower-cased, whitespace-collapsed. 128
- * bits is collision-proof enough for per-chat history.
- */
-export function hashText(text: string): string {
-  const normalized = text.trim().toLowerCase().replace(/\s+/g, " ");
-  return createHash("sha256").update(normalized).digest("hex").slice(0, 32);
-}
-
-export function hasDedupHash(state: UsageState, key: string, text: string): boolean {
-  const prior = state.recentSends[key];
-  if (!prior || prior.length === 0) return false;
-  return prior.includes(hashText(text));
-}
-
-export function pushDedupHash(state: UsageState, key: string, text: string): void {
-  const hash = hashText(text);
-  const prior = state.recentSends[key] ?? [];
-  // Newest-first FIFO, capped. Don't double-record if already there.
-  if (prior[0] === hash) {
-    // Still re-touch for LRU: move this key to end of insertion order.
-    delete state.recentSends[key];
-    state.recentSends[key] = prior;
-    return;
-  }
-  prior.unshift(hash);
-  if (prior.length > MAX_DEDUP_HASHES_PER_KEY) prior.length = MAX_DEDUP_HASHES_PER_KEY;
-  // Re-insert to move key to end of enumeration order (LRU by last-touch).
-  delete state.recentSends[key];
-  state.recentSends[key] = prior;
-
-  // LRU eviction: drop oldest keys until under cap.
-  const keys = Object.keys(state.recentSends);
-  if (keys.length > MAX_RECENT_SEND_KEYS) {
-    const excess = keys.length - MAX_RECENT_SEND_KEYS;
-    for (let i = 0; i < excess; i++) {
-      const oldest = keys[i];
-      if (oldest !== undefined) delete state.recentSends[oldest];
-    }
-  }
 }

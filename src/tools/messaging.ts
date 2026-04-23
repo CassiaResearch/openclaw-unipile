@@ -164,7 +164,6 @@ export function registerMessagingTools(api: OpenClawPluginApi, ctx: ToolContext)
         return runUnipileTool(ctx, {
           toolName: "linkedin_send_message",
           category: "message_write",
-          dedup: { key: `msg:${params.chatId}`, payload: text },
           run: () => client.messaging.sendMessage({ chat_id: params.chatId, text }),
         });
       },
@@ -193,15 +192,9 @@ export function registerMessagingTools(api: OpenClawPluginApi, ctx: ToolContext)
           subject,
         });
 
-        // Sorted + joined so "same group + same text" gets blocked regardless
-        // of attendee order. Different recipients started individually get
-        // different keys — bulk template outreach is fine.
-        const dedupKey = `chat:${[...params.attendeeProviderIds].sort().join("|")}`;
-
         return runUnipileTool(ctx, {
           toolName: "linkedin_start_chat",
           category: "message_write",
-          dedup: { key: dedupKey, payload: text },
           run: () => {
             if (effectiveType === "sales_navigator") {
               return client.messaging.startNewChat({

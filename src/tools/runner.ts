@@ -9,6 +9,12 @@ import type { RateCategory, UnipileConfig } from "../types.js";
 export interface ToolResult {
   content: { type: "text"; text: string }[];
   details: unknown;
+  /**
+   * MCP-style flag telling the host that `content` describes an error, not a
+   * successful result. Agents can branch on this without having to parse the
+   * `[unipile:tool]` prefix text. Absent = success.
+   */
+  isError?: boolean;
 }
 
 export interface ToolContext {
@@ -26,17 +32,21 @@ export interface ExecuteOptions<T> {
   actualCost?: (result: T) => number;
   run: () => Promise<T>;
   /**
-   * When set, the runner checks `payload` against prior sends recorded under
-   * `key` and refuses the call if we've sent the same text before. On success
-   * or indeterminate outcome, the hash is recorded. Skip for bypass/read
-   * tools — this is strictly for write endpoints where LinkedIn flags
-   * repeated identical bodies as automation.
+   * If a waitable block (spacing / cooldown) would otherwise fail the call,
+   * the limiter is allowed to `sleep` up to this many seconds inside `gate()`
+   * before re-checking. Keeps batches draining at the natural pace instead of
+   * forcing the agent to orchestrate its own backoff. Budget / working-hours
+   * blocks ignore this and still throw immediately.
    */
-  dedup?: { key: string; payload: string };
+  waitUpToSec?: number;
 }
 
 export function textResult(text: string): ToolResult {
   return { content: [{ type: "text", text }], details: null };
+}
+
+export function errorResult(text: string): ToolResult {
+  return { content: [{ type: "text", text }], details: null, isError: true };
 }
 
 function serialize(value: unknown): string {
@@ -109,24 +119,23 @@ export function defineTool<TParameters extends TSchema>(
 }
 
 export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Promise<ToolResult> {
-  const { toolName, category, reservedCost = 1, cooldownKey, actualCost, run, dedup } = opts;
+  const { toolName, category, reservedCost = 1, cooldownKey, actualCost, run, waitUpToSec } = opts;
   const rule = ctx.limiter.getRule(category);
 
   const invoke = async (): Promise<ToolResult> => {
-    if (dedup && ctx.limiter.isDuplicateSend(dedup.key, dedup.payload)) {
-      const reason = `Duplicate message detected — the same text was already sent to this recipient. Rephrase before retrying; repeated identical bodies get flagged by LinkedIn as automation.`;
-      ctx.limiter.recordBlocked({ toolName, category, reason });
-      ctx.log.warn(`${toolName} blocked: duplicate payload`);
-      return textResult(`[unipile:${toolName}] ${reason}`);
-    }
-
     if (!rule.bypassAll) {
       try {
-        await ctx.limiter.gate({ toolName, category, cost: reservedCost, cooldownKey });
+        await ctx.limiter.gate({
+          toolName,
+          category,
+          cost: reservedCost,
+          cooldownKey,
+          waitUpToSec,
+        });
       } catch (err) {
         if (err instanceof UnipileLimitError) {
           ctx.log.warn(`${toolName} blocked: ${err.message}`);
-          return textResult(`[unipile:${toolName}] ${err.message}`);
+          return errorResult(`[unipile:${toolName}] ${err.message}`);
         }
         throw err;
       }
@@ -149,7 +158,6 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
           durationMs: Date.now() - startedAt,
         });
       }
-      if (dedup) ctx.limiter.recordSend(dedup.key, dedup.payload);
       return textResult(serialize(result));
     } catch (err) {
       const durationMs = Date.now() - startedAt;
@@ -168,11 +176,8 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
           durationMs,
           indeterminate: true,
         });
-        // Record dedup hash too — the message may have landed, so block
-        // retries of the same text.
-        if (dedup) ctx.limiter.recordSend(dedup.key, dedup.payload);
         ctx.log.warn(`${toolName} indeterminate: ${msg}`);
-        return textResult(`[unipile:${toolName}] ${msg}`);
+        return errorResult(`[unipile:${toolName}] ${msg}`);
       }
 
       if (!rule.bypassAll) {
@@ -186,7 +191,7 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
         });
       }
       ctx.log.warn(`${toolName} failed: ${msg}`);
-      return textResult(`[unipile:${toolName}] ${msg}`);
+      return errorResult(`[unipile:${toolName}] ${msg}`);
     }
   };
 

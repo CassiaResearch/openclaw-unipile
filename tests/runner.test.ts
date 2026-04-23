@@ -61,53 +61,22 @@ describe("runUnipileTool", () => {
     expect(blocked.content[0]?.text).toMatch(/Daily.+budget exhausted/);
   });
 
-  it("dedup blocks a duplicate write without hitting run()", async () => {
-    const ctx = makeCtx();
-    let calls = 0;
-    const opts = {
-      toolName: "linkedin_send_message",
-      category: "message_write" as const,
-      dedup: { key: "msg:chat-1", payload: "Hi there" },
-      run: async () => {
-        calls += 1;
-        return { ok: true };
-      },
-    };
-    await runUnipileTool(ctx, opts);
-    const second = await runUnipileTool(ctx, opts);
-    expect(calls).toBe(1);
-    expect(second.content[0]?.text).toMatch(/Duplicate message detected/);
-    const report = ctx.limiter.report({ eventLimit: 5 });
-    expect(
-      report.recentEvents.some((e) => e.result === "blocked" && /Duplicate/.test(e.reason ?? "")),
-    ).toBe(true);
-  });
-
-  it("indeterminate write (504) counts the call and records the dedup hash", async () => {
+  it("indeterminate write (504) counts the call against budget and flags the result", async () => {
     const ctx = makeCtx();
     const timeout504 = { body: { status: 504, type: "errors/request_timeout" } };
     const res = await runUnipileTool(ctx, {
       toolName: "linkedin_send_message",
       category: "message_write",
-      dedup: { key: "msg:chat-7", payload: "Hello" },
       run: async () => {
         throw timeout504;
       },
     });
     expect(res.content[0]?.text).toMatch(/timed out/);
+    expect(res.isError).toBe(true);
 
     const report = ctx.limiter.report({ eventLimit: 5 });
     expect(report.categories.message_write?.today.used.calls).toBe(1);
     expect(report.recentEvents[0]?.result).toBe("indeterminate");
-
-    // Retrying with the same text must now be blocked as duplicate.
-    const retry = await runUnipileTool(ctx, {
-      toolName: "linkedin_send_message",
-      category: "message_write",
-      dedup: { key: "msg:chat-7", payload: "Hello" },
-      run: async () => ({}),
-    });
-    expect(retry.content[0]?.text).toMatch(/Duplicate message detected/);
   });
 
   it("actualCost overrides reservedCost on success (search-result billing)", async () => {

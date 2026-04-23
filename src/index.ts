@@ -29,6 +29,18 @@ const plugin: OpenClawPluginDefinition = {
       return;
     }
 
+    // Containerized hosts commonly run in UTC even when the operator thinks
+    // in a local zone. Flag it early so "09:00–18:00 in system TZ" silent
+    // misconfig doesn't show up as "writes only happen overnight in PST".
+    if (cfg.workingHours.timezone === "system") {
+      const hostTz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "unknown";
+      if (hostTz !== "UTC") {
+        log.warn(
+          `workingHours.timezone='system' and host TZ is '${hostTz}'. Set workingHours.timezone to an explicit IANA string if this isn't what you want.`,
+        );
+      }
+    }
+
     const client = getClient(cfg);
     const limiter = createRateLimiter(cfg, log);
 

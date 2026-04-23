@@ -4,10 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   addCategoryCount,
   addToolCount,
-  hasDedupHash,
-  hashText,
   loadUsage,
-  pushDedupHash,
   pushEvent,
   saveUsage,
 } from "../src/rateLimit/storage.js";
@@ -42,8 +39,6 @@ describe("storage — persistence", () => {
       },
       100,
     );
-    pushDedupHash(state, "msg:chat-1", "Hello there");
-
     saveUsage(ACCOUNT, state);
     const loaded = loadUsage(ACCOUNT, { accountTier: "sales_navigator" });
 
@@ -53,8 +48,6 @@ describe("storage — persistence", () => {
     });
     expect(loaded.aggregates.perTool["2026-04-22"]?.linkedin_send_invitation).toBe(5);
     expect(loaded.events).toHaveLength(1);
-    expect(loaded.recentSends["msg:chat-1"]).toHaveLength(1);
-    expect(hasDedupHash(loaded, "msg:chat-1", "HELLO there")).toBe(true);
   });
 
   it("returns a fresh state when the file is missing", () => {
@@ -97,32 +90,5 @@ describe("storage — persistence", () => {
 
     const state = loadUsage(ACCOUNT, { accountTier: "sales_navigator" });
     expect((state as unknown as Record<string, unknown>).foo).toBeUndefined();
-  });
-});
-
-describe("dedup helpers", () => {
-  it("hashText normalizes whitespace and case", () => {
-    expect(hashText("Hi there")).toBe(hashText("  hi  THERE\n"));
-    expect(hashText("Hi there")).toBe(hashText("hi\tthere"));
-    expect(hashText("a")).not.toBe(hashText("b"));
-  });
-
-  it("pushDedupHash caps the ring at 100 entries and skips consecutive duplicates", () => {
-    const state = loadUsage("a", { accountTier: "classic" });
-    for (let i = 0; i < 105; i++) pushDedupHash(state, "k", `msg${i}`);
-    expect(state.recentSends.k?.length).toBe(100);
-
-    // Pushing the same hash twice in a row doesn't double-record.
-    const before = state.recentSends.k?.length ?? 0;
-    pushDedupHash(state, "k", "msg104");
-    expect(state.recentSends.k?.length).toBe(before);
-  });
-
-  it("hasDedupHash detects prior sends by normalized equivalence", () => {
-    const state = loadUsage("a", { accountTier: "classic" });
-    pushDedupHash(state, "msg:chat-1", "Hey, got a minute?");
-    expect(hasDedupHash(state, "msg:chat-1", "hey, GOT a minute?")).toBe(true);
-    expect(hasDedupHash(state, "msg:chat-1", "Hey, got a second?")).toBe(false);
-    expect(hasDedupHash(state, "msg:other", "Hey, got a minute?")).toBe(false);
   });
 });

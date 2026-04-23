@@ -144,3 +144,26 @@ export function formatSeconds(sec: number): string {
   if (sec < 3600) return `${Math.ceil(sec / 60)}m`;
   return `${(sec / 3600).toFixed(1)}h`;
 }
+
+/**
+ * First moment at or after `now` when the working-hours window opens. Null if
+ * currently in-window or if no valid minute was found within 8 days (which
+ * would imply `days` is empty — the config path should prevent that, but we
+ * don't crash on it). Uses minute-granularity search because the window is
+ * HH:MM, the weekday filter can create gaps, and analytic math gets ugly for
+ * overnight windows in arbitrary TZs.
+ */
+export function nextWorkingHoursStart(
+  wh: UnipileWorkingHours,
+  log: Log,
+  now = new Date(),
+): Date | null {
+  if (checkWorkingHours(wh, log, now).ok) return null;
+  const stepMs = 60 * 1000;
+  const horizon = 8 * 24 * 60; // minutes
+  for (let i = 1; i <= horizon; i++) {
+    const t = new Date(now.getTime() + i * stepMs);
+    if (checkWorkingHours(wh, log, t).ok) return t;
+  }
+  return null;
+}

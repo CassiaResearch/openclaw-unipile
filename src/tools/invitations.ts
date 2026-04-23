@@ -66,7 +66,7 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
       name: "linkedin_send_invitation",
       label: "LinkedIn: send connection invitation",
       description:
-        "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps.",
+        "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps. The call will wait up to ~120 s for the spacing window rather than fail fast, so a batch of sequential calls drains naturally.",
       parameters: SendInvitationParams,
       execute: async (_id, params) => {
         // 300-char cap is enforced by the JSON schema (`maxLength`), so input
@@ -76,6 +76,9 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
         return runUnipileTool(ctx, {
           toolName: "linkedin_send_invitation",
           category: "invitation_write",
+          // ≥90 s spacing + some slack so the wait covers the full window
+          // after jitter + the current call's duration.
+          waitUpToSec: 120,
           run: () =>
             client.users.sendInvitation(
               compact({

@@ -136,7 +136,10 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
     try {
       const result = await run();
       if (!rule.bypassAll) {
-        const cost = actualCost ? Math.max(0, actualCost(result)) : reservedCost;
+        // actualCost is caller-supplied; guard against NaN / -∞ / non-finite
+        // values so a buggy extractor can't poison the persisted counters.
+        const raw = actualCost ? actualCost(result) : reservedCost;
+        const cost = Number.isFinite(raw) ? Math.max(0, raw) : reservedCost;
         ctx.limiter.recordSuccess({
           toolName,
           category,

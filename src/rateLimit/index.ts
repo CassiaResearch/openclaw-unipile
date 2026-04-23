@@ -31,7 +31,7 @@ import {
 
 const PENALTY_MULTIPLIER = 5;
 const PENALTY_SPACING_BONUS_SEC = 120;
-const PERSIST_DEBOUNCE_MS = 1000;
+const PERSIST_DEBOUNCE_MS = 10000;
 
 export interface GateOptions {
   toolName: string;

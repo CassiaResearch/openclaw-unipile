@@ -175,14 +175,21 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
             body.category = params.category;
           }
         }
+        // Pagination cursor goes in the BODY for /linkedin/search (matches
+        // the documented Unipile contract and known-working caller code).
+        // Do not put it in the query string — it's silently ignored there,
+        // which looks like pagination resetting to page 1 every call.
+        if (params.cursor) {
+          body.cursor = params.cursor;
+        }
 
-        // Unipile's /linkedin/search expects account_id and api as QUERY
-        // parameters, not body fields (matches linkedin_search_parameters).
-        // Putting them in the body yields `400 /account_id Required property`.
-        // Build query last so filters/url can't override these.
+        // Unipile's /linkedin/search expects account_id as a QUERY parameter
+        // (matches linkedin_search_parameters). Putting it in the body yields
+        // `400 /account_id Required property`. `api` selects the search
+        // variant and is a query param too. Build query last so filters/url
+        // can't override these.
         const query: Record<string, string> = {};
         if (params.limit !== undefined) query.limit = String(params.limit);
-        if (params.cursor) query.cursor = params.cursor;
         query.account_id = cfg.accountId;
         query.api = effectiveType;
 
@@ -203,6 +210,7 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
             const res = await client.request.send<RawSearchResponse>({
               method: "POST",
               path: ["linkedin", "search"],
+              headers: { "Content-Type": "application/json" as const },
               body,
               parameters: query,
             });

@@ -138,6 +138,24 @@ describe("linkedin_search — compact projection", () => {
     expect(body.keywords).toBe("vp");
   });
 
+  it("pagination cursor goes in the body, not the query", async () => {
+    // Regression: Unipile's /linkedin/search reads `cursor` from the request
+    // body. Putting it in the query is silently ignored, which looks like
+    // pagination resetting to page 1 on every call. Match the known-working
+    // caller pattern: cursor in body, account_id/limit/api in query.
+    const h = harness();
+    const tool = h.tools.get("linkedin_search")!;
+    await tool.execute("id-c", { keywords: "vp", cursor: "page-2-cursor", limit: 50 });
+
+    const params = h.lastQuery.params as Record<string, string>;
+    const body = h.lastQuery.body as Record<string, unknown>;
+
+    expect(body.cursor).toBe("page-2-cursor");
+    expect(params.cursor).toBeUndefined();
+    // Limit stays in the query alongside account_id/api.
+    expect(params.limit).toBe("50");
+  });
+
   it("rejects non-linkedin URLs with errorCode='invalid_target'", async () => {
     const h = harness();
     const tool = h.tools.get("linkedin_search")!;

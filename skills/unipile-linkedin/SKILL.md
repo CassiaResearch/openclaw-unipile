@@ -28,12 +28,16 @@ allowed-tools:
 
 # Unipile LinkedIn
 
+Use this skill for any LinkedIn outreach, messaging, or inbox work on the connected Unipile account. Not for: email outreach, billing/account reconnection, or managing multiple LinkedIn accounts.
+
 All `linkedin_*` tools operate on **one** connected LinkedIn account — the `accountId` from plugin config. The account is either **classic**, **sales_navigator**, or **recruiter**; the plugin picks sensible defaults per tier.
+
+If writes globally fail with `account_disconnected` or `checkpoint`, the account needs a human — surface that to the user and stop. For any block you don't understand, call `linkedin_usage_report` (free, bypasses rate limiting) to see working-hours state, per-category budgets, cooldowns, and recent gate decisions.
 
 ## Safety Rails (Do Not Fight Them)
 
 - **Writes are capped** per-day, per-week, and per-month. Hitting a cap returns `isError: true` with `errorCode: "budget_exhausted"`. Don't retry — wait.
-- **Writes are spaced** (invitations ≥90 s apart). `linkedin_send_invitation` waits up to 120 s for the spacing window by default. If your harness has a short per-tool timeout, pass `waitSec: 0` (or a smaller value) to fail fast with `errorCode: "spacing"` + a `retryAt` timestamp and orchestrate pacing yourself.
+- **Writes are spaced** (invitations ≥90 s apart). `linkedin_send_invitation` waits up to 120 s for the spacing window by default and emits a progress heartbeat every ~10 s while waiting (`details.status = "waiting"`, `secondsRemaining`, `readyAt`). Most harnesses treat these as liveness pings and keep the tool call alive. If your harness doesn't, pass `waitSec: 0` (or a smaller value) to fail fast with `errorCode: "spacing"` + a `retryAt` timestamp and orchestrate pacing yourself.
 - **Writes are blocked outside working hours.** Reads run any time. If a write returns `errorCode: "working_hours"`, the block is unconditional until `retryAt`.
 - **Writes serialize** on a per-account mutex. Firing many invites in parallel is fine — they queue, not race.
 
@@ -53,27 +57,17 @@ Passing `sender_id` to `linkedin_send_invitation` will fail with `errorCode: "in
 
 ## Error Handling
 
-Every error result has an `errorCode`. Branch on it, not on the message text.
+Every error result has an `errorCode`. Branch on it, not on the message text. The codes that should change immediate flow control:
 
-| errorCode                              | What to do                                                                                                                                                                                                                                                                                                                                                 |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `budget_exhausted`                     | Stop this batch. Use `retryAt` (daily=UTC midnight, weekly/monthly=rolling).                                                                                                                                                                                                                                                                               |
-| `working_hours`                        | Stop writes. `retryAt` is the next open window.                                                                                                                                                                                                                                                                                                            |
-| `spacing` / `cooldown`                 | Wait until `retryAt`, then retry. (Invitations auto-wait up to 120 s.)                                                                                                                                                                                                                                                                                     |
-| `rate_limit`                           | LinkedIn itself rate-limited you. Back off far harder than our caps suggest.                                                                                                                                                                                                                                                                               |
-| `account_disconnected` / `checkpoint`  | **Surface to the user.** Agent cannot fix; operator must reconnect via the Unipile dashboard.                                                                                                                                                                                                                                                              |
-| `premium_required`                     | Account is missing Sales Navigator / Recruiter / premium. Stop, tell user.                                                                                                                                                                                                                                                                                 |
-| `account_restricted`                   | LinkedIn has restricted the account. Stop, tell user.                                                                                                                                                                                                                                                                                                      |
-| `already_connected`                    | 1st-degree connection exists — skip the invitation; message if needed.                                                                                                                                                                                                                                                                                     |
-| `invitation_pending`                   | An invite from us is already pending for this target. Don't retry.                                                                                                                                                                                                                                                                                         |
-| `not_connected`                        | Target isn't 1st-degree and the send wasn't an InMail/Open-Profile. Invite first, or route via InMail.                                                                                                                                                                                                                                                     |
-| `inmail_not_allowed`                   | Target doesn't accept InMails. Connect first.                                                                                                                                                                                                                                                                                                              |
-| `insufficient_credits`                 | Out of InMail credits. Stop, tell user.                                                                                                                                                                                                                                                                                                                    |
-| `blocked_recipient` / `invalid_target` | Skip this target.                                                                                                                                                                                                                                                                                                                                          |
-| `content_invalid`                      | Message body is too long or LinkedIn rejected it. Shorten / rephrase.                                                                                                                                                                                                                                                                                      |
-| `not_found`                            | Chat / invitation / profile doesn't exist. Re-fetch from a list endpoint.                                                                                                                                                                                                                                                                                  |
-| `timeout`                              | **The write may have landed.** For `linkedin_send_invitation`: check `linkedin_list_invitations_sent` before retrying. For `linkedin_send_message`: check `linkedin_list_chat_messages(chatId)`. For `linkedin_start_chat`: scan `linkedin_list_chats` for a recent chat with the attendee provider_ids. Cached reads lag ~30–60 s; wait before verifying. |
-| `network_error` / `upstream_error`     | Transient. Retry in a few minutes.                                                                                                                                                                                                                                                                                                                         |
+| errorCode                             | What to do                                                                                                                                               |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `budget_exhausted`                    | Stop this batch. Use `retryAt` (daily=UTC midnight, weekly/monthly=rolling).                                                                             |
+| `working_hours`                       | Stop writes. `retryAt` is the next open window.                                                                                                          |
+| `spacing` / `cooldown`                | Wait until `retryAt`, then retry. (Invitations auto-wait up to 120 s.)                                                                                   |
+| `timeout`                             | **Indeterminate — the write may have landed.** Verify via the matching list endpoint before any retry. Cached reads lag ~30–60 s; wait before verifying. |
+| `account_disconnected` / `checkpoint` | **Surface to the user.** Agent cannot fix; operator must reconnect via the Unipile dashboard.                                                            |
+
+Full code reference (premium / credit / target-state / content / network codes): see `references/error-codes.md`.
 
 ## Pre-flight Planning
 
@@ -146,7 +140,9 @@ If there's **no existing chat** with the target:
 linkedin_start_chat (attendeeProviderIds: [oneId], text)
 ```
 
-Passing multiple `attendeeProviderIds` creates ONE group chat with all of them — for individual outreach to N people, call N times, one recipient each. Defaults to Sales Navigator API on SN/Recruiter accounts. For InMail, pass `inmail: true` — the plugin will force the classic path regardless of searchType (InMail only exists on classic messaging).
+> ⚠️ **One recipient per call.** Passing multiple `attendeeProviderIds` creates ONE **group chat** with all of them, not individual DMs. For outreach to N people, call N times with one id each.
+
+Defaults to Sales Navigator API on SN/Recruiter accounts. For InMail, pass `inmail: true` — the plugin will force the classic path regardless of searchType (InMail only exists on classic messaging).
 
 If there **is** an existing chat (look it up via `linkedin_list_chats`):
 
@@ -158,17 +154,15 @@ linkedin_send_message (chatId, text)
 
 - **Polling faster than the cooldown.** `linkedin_list_relations`, `linkedin_list_invitations_*` each carry a 4 h per-tool cooldown. If a call returns `errorCode: "cooldown"`, wait until `retryAt` — don't pound the tool.
 - **Ignoring `pending_invitation` on search results.** Re-inviting a pending target returns `errorCode: "invitation_pending"`.
-- **Retrying a timeout.** `errorCode: "timeout"` means indeterminate — the write may have landed. Verify via `linkedin_list_invitations_sent` / `linkedin_list_chats` before any retry. Remember those reads are cached and can lag ~30–60 s behind LinkedIn; wait before verifying.
+- **Retrying a timeout.** See the `timeout` row in Error Handling — verify via the matching list endpoint before retrying.
 - **Bulk outreach with identical bodies.** LinkedIn flags repeated identical message text as automation. Vary the opener, even minimally.
 - **Fighting working hours.** Don't retry write calls outside the window — they'll keep failing. Schedule batches inside it, or use `retryAt` to know when to resume.
 
 ## Diagnostic Workflow
 
-When a tool returns an unexpected block, call `linkedin_usage_report` (free, bypasses rate limiting) to see:
+`linkedin_usage_report` surfaces:
 
 - `workingHours.ok` + `nextOkAt`
 - per-category `today/week/month` used vs. remaining + `spacingReadyAt`
 - `cooldowns` with `readyAt` per polling tool
 - `recentEvents` with the last N gate decisions
-
-If writes are globally failing with `errorCode: "account_disconnected"` or `"checkpoint"`: the account needs a human. Surface that to the user.

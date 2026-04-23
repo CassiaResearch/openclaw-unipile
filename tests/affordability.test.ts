@@ -45,6 +45,50 @@ describe("gate — waitUpToSec drains naturally", () => {
     ).rejects.toThrow(/Minimum spacing/);
   });
 
+  it("emits heartbeats via onUpdate during spacing wait, at ~10 s cadence", async () => {
+    const limiter = createRateLimiter(makeConfig(), silentLog);
+    await limiter.gate({ toolName: "inv", category: "invitation_write" });
+    limiter.recordSuccess({ toolName: "inv", category: "invitation_write" });
+
+    type Update = { content: { text: string }[]; details?: unknown };
+    const updates: Update[] = [];
+    const onUpdate = (u: Update) => {
+      updates.push(u);
+    };
+
+    const gatePromise = limiter.gate({
+      toolName: "inv",
+      category: "invitation_write",
+      waitUpToSec: 120,
+      onUpdate,
+    });
+
+    // Initial tick fires synchronously before the first await inside gate().
+    await Promise.resolve();
+    expect(updates.length).toBeGreaterThanOrEqual(1);
+
+    // Advance the full 90 s spacing window in one sweep and let the gate resolve.
+    await vi.advanceTimersByTimeAsync(95_000);
+    await expect(gatePromise).resolves.toBeUndefined();
+
+    // We should have seen 9 heartbeats (initial + one per 10 s slice, minus
+    // the final "remaining > 0" check that suppresses the tail tick).
+    expect(updates.length).toBe(9);
+
+    // Every update carries the structured payload the agent can branch on.
+    for (const u of updates) {
+      const d = u.details as { status?: string; blockingCode?: string; secondsRemaining?: number };
+      expect(d.status).toBe("waiting");
+      expect(d.blockingCode).toBe("spacing");
+      expect(typeof d.secondsRemaining).toBe("number");
+    }
+    // Countdown should be monotonically decreasing.
+    const counts = updates.map((u) => (u.details as { secondsRemaining: number }).secondsRemaining);
+    for (let i = 1; i < counts.length; i++) {
+      expect(counts[i]).toBeLessThan(counts[i - 1]!);
+    }
+  });
+
   it("waitSec=0 on linkedin_send_invitation yields a spacing errorCode, no wait", async () => {
     // Build an invitations harness with the real tool wiring so we verify
     // the param flows through from tool → runner → gate.

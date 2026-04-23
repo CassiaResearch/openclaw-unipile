@@ -74,9 +74,9 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
       name: "linkedin_send_invitation",
       label: "LinkedIn: send connection invitation",
       description:
-        "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps. By default the call waits up to 120 s for the spacing window rather than fail fast — override via `waitSec` if your harness has a short per-tool timeout. Returns `{ object: 'UserInvitationSent', invitation_id }`.",
+        "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps. By default the call waits up to 120 s for the spacing window and emits progress heartbeats every ~10 s (`details.status=\"waiting\"`, `secondsRemaining`, `readyAt`) so harnesses keep the tool call alive; override via `waitSec` if you prefer fail-fast. Returns `{ object: 'UserInvitationSent', invitation_id }`.",
       parameters: SendInvitationParams,
-      execute: async (_id, params) => {
+      execute: async (_id, params, _signal, onUpdate) => {
         // 300-char cap is enforced by the JSON schema (`maxLength`), so input
         // that exceeds it is rejected before execute() runs.
         const providerId = params.providerId.trim();
@@ -87,6 +87,10 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
           // Default 120 s covers the 90 s spacing plus slack; agent can lower
           // (even to 0) to match its own orchestration / timeout budget.
           waitUpToSec: params.waitSec ?? 120,
+          // Forward the harness's progress callback so the limiter can emit
+          // heartbeats during the spacing wait — keeps the tool call visible
+          // instead of going dark for up to 120 s.
+          onUpdate,
           run: () =>
             client.users.sendInvitation(
               compact({

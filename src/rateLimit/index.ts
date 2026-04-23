@@ -12,6 +12,7 @@ import {
   minSpacingRemainingSec,
   nextWorkingHoursStart,
   sleep,
+  sleepWithHeartbeat,
 } from "./pacing.js";
 import {
   addCategoryCount,
@@ -33,6 +34,17 @@ const PENALTY_MULTIPLIER = 5;
 const PENALTY_SPACING_BONUS_SEC = 120;
 const PERSIST_DEBOUNCE_MS = 10000;
 
+/**
+ * Partial-progress callback the tool receives from the agent harness. Matches
+ * `AgentToolUpdateCallback` in the pi-agent-core SDK: a function taking an
+ * `AgentToolResult`-shaped object. We declare a local structural type so this
+ * package doesn't need to depend on pi-agent-core directly.
+ */
+export type ProgressUpdate = (partial: {
+  content: { type: "text"; text: string }[];
+  details?: unknown;
+}) => void;
+
 export interface GateOptions {
   toolName: string;
   category: RateCategory;
@@ -45,6 +57,12 @@ export interface GateOptions {
    * waits are too long to sit on synchronously. Default 0 = legacy fail-fast.
    */
   waitUpToSec?: number;
+  /**
+   * Optional progress callback from the agent harness. When the gate sleeps
+   * for a soft block, we emit heartbeat pings every ~10 s so the tool call
+   * stays visible and the harness's per-tool timeout resets on each update.
+   */
+  onUpdate?: ProgressUpdate;
 }
 
 export interface RecordSuccessOptions {
@@ -409,7 +427,7 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
 
     getRule: (category) => rules[category],
 
-    async gate({ toolName, category, cost = 1, cooldownKey, waitUpToSec = 0 }) {
+    async gate({ toolName, category, cost = 1, cooldownKey, waitUpToSec = 0, onUpdate }) {
       const rule = rules[category];
       const key = cooldownKey ?? category;
 
@@ -438,7 +456,33 @@ export function createRateLimiter(cfg: UnipileConfig, log: Log): RateLimiter {
       if (soft) {
         const waitBudgetMs = Math.max(0, waitUpToSec) * 1000;
         if (soft.waitMs > waitBudgetMs) rejectWith(soft.reason, soft.code);
-        await sleep(soft.waitMs);
+        if (onUpdate) {
+          // Emit a heartbeat every ~10 s so the harness's per-tool timeout
+          // resets on each update and the user sees live progress rather
+          // than a stuck tool call. The final call result (success or error)
+          // is still what the agent's turn actually consumes.
+          const waitCode = soft.code;
+          await sleepWithHeartbeat(soft.waitMs, 10_000, (remMs) => {
+            const secondsRemaining = Math.ceil(remMs / 1000);
+            onUpdate({
+              content: [
+                {
+                  type: "text",
+                  text: `[unipile:${toolName}] ${soft.reason} (~${secondsRemaining}s remaining)`,
+                },
+              ],
+              details: {
+                status: "waiting",
+                blockingCode: waitCode,
+                category,
+                secondsRemaining,
+                readyAt: new Date(Date.now() + remMs).toISOString(),
+              },
+            });
+          });
+        } else {
+          await sleep(soft.waitMs);
+        }
         // Re-check hard blocks: the sleep may have crossed a working-hours
         // boundary. Re-check soft too — with the mutex serializing writes and
         // spacing only advancing on recordSuccess, this is belt-and-braces.

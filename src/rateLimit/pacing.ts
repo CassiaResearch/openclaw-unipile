@@ -19,6 +19,30 @@ export async function jitter(minMs: number, maxMs: number): Promise<void> {
   if (ms > 0) await sleep(ms);
 }
 
+/**
+ * Sleep for `totalMs`, but subdivide the wait into `intervalMs` chunks and
+ * invoke `onTick(remainingMs)` after each chunk. Emits an initial tick at the
+ * start too so harnesses know the wait has begun. Used by gate() to keep the
+ * agent tool-call "alive" during long spacing waits — most harnesses reset
+ * their per-tool timeout when they see a progress update.
+ */
+export async function sleepWithHeartbeat(
+  totalMs: number,
+  intervalMs: number,
+  onTick: (remainingMs: number) => void,
+): Promise<void> {
+  if (totalMs <= 0) return;
+  onTick(totalMs);
+  let remaining = totalMs;
+  const slice = Math.max(1, intervalMs);
+  while (remaining > 0) {
+    const chunk = Math.min(slice, remaining);
+    await sleep(chunk);
+    remaining -= chunk;
+    if (remaining > 0) onTick(remaining);
+  }
+}
+
 function resolveTimezone(tz: string): string | undefined {
   if (!tz || tz === "system") return undefined;
   return tz;

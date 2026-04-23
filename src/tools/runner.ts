@@ -9,7 +9,7 @@ import {
   type UnipileErrorCode,
 } from "../errors.js";
 import type { Log } from "../log.js";
-import type { RateLimiter } from "../rateLimit/index.js";
+import type { ProgressUpdate, RateLimiter } from "../rateLimit/index.js";
 import type { RateCategory, UnipileConfig } from "../types.js";
 
 export interface ToolResult {
@@ -28,6 +28,16 @@ export interface ToolResult {
    */
   errorCode?: UnipileErrorCode;
 }
+
+/**
+ * Progress-update callback the agent harness passes as the fourth positional
+ * argument to `execute`. We emit heartbeats during long spacing waits so the
+ * tool call stays visible and the harness's per-tool timeout resets.
+ *
+ * Re-exported from the rate-limit module so tool files only import from
+ * runner.ts. Matches pi-agent-core's `AgentToolUpdateCallback` shape.
+ */
+export type ToolProgressCallback = ProgressUpdate;
 
 export interface ToolContext {
   cfg: UnipileConfig;
@@ -51,6 +61,12 @@ export interface ExecuteOptions<T> {
    * blocks ignore this and still throw immediately.
    */
   waitUpToSec?: number;
+  /**
+   * Harness-supplied progress callback. When set and the gate has to sleep
+   * for a soft block, we emit periodic pings so the harness keeps the tool
+   * call live instead of timing it out.
+   */
+  onUpdate?: ToolProgressCallback;
 }
 
 export function textResult(text: string): ToolResult {
@@ -122,7 +138,18 @@ export interface UnipileToolDefinition<TParameters extends TSchema> {
   label: string;
   description: string;
   parameters: TParameters;
-  execute: (toolCallId: string, params: Static<TParameters>) => Promise<ToolResult>;
+  /**
+   * Execute the tool. Signature matches pi-agent-core's AgentTool.execute
+   * positionally — we accept an optional AbortSignal (currently unused;
+   * reserved for future cancellation plumbing) and an optional progress
+   * callback for heartbeats during long spacing waits.
+   */
+  execute: (
+    toolCallId: string,
+    params: Static<TParameters>,
+    signal?: AbortSignal,
+    onUpdate?: ToolProgressCallback,
+  ) => Promise<ToolResult>;
 }
 
 export function defineTool<TParameters extends TSchema>(
@@ -135,7 +162,16 @@ export function defineTool<TParameters extends TSchema>(
 }
 
 export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Promise<ToolResult> {
-  const { toolName, category, reservedCost = 1, cooldownKey, actualCost, run, waitUpToSec } = opts;
+  const {
+    toolName,
+    category,
+    reservedCost = 1,
+    cooldownKey,
+    actualCost,
+    run,
+    waitUpToSec,
+    onUpdate,
+  } = opts;
   const rule = ctx.limiter.getRule(category);
 
   const invoke = async (): Promise<ToolResult> => {
@@ -147,6 +183,7 @@ export function runUnipileTool<T>(ctx: ToolContext, opts: ExecuteOptions<T>): Pr
           cost: reservedCost,
           cooldownKey,
           waitUpToSec,
+          onUpdate,
         });
       } catch (err) {
         if (err instanceof UnipileLimitError) {

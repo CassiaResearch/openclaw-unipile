@@ -81,7 +81,7 @@ export function registerMessagingTools(api: OpenClawPluginApi, ctx: ToolContext)
       name: "linkedin_list_chats",
       label: "LinkedIn: list chats",
       description:
-        "List LinkedIn DM conversations for the connected account. Supports pagination and filtering by unread. Served from Unipile's cache; bypasses the rate limiter.",
+        "List LinkedIn DM conversations for the connected account. Pass `unread: true` for inbox triage. Each item's `id` is the chatId needed by linkedin_list_chat_messages and linkedin_send_message. Served from Unipile's cache; bypasses the rate limiter.",
       parameters: ListChatsParams,
       execute: async (_id, params) =>
         runUnipileTool(ctx, {
@@ -107,7 +107,7 @@ export function registerMessagingTools(api: OpenClawPluginApi, ctx: ToolContext)
       name: "linkedin_list_chat_messages",
       label: "LinkedIn: list messages in a chat",
       description:
-        "Fetch the message history of a LinkedIn DM thread. Requires chatId from linkedin_list_chats. Served from Unipile's cache; bypasses the rate limiter.",
+        "Fetch the message history of a LinkedIn DM thread. `chatId` comes from linkedin_list_chats. Each message's `sender_id` is a Unipile attendee_id (a chat-scoped identifier), NOT a LinkedIn provider_id — do not pass it to linkedin_send_invitation or linkedin_get_profile. Served from Unipile's cache; bypasses the rate limiter.",
       parameters: ListChatMessagesParams,
       execute: async (_id, params) =>
         runUnipileTool(ctx, {
@@ -176,10 +176,14 @@ export function registerMessagingTools(api: OpenClawPluginApi, ctx: ToolContext)
       name: "linkedin_start_chat",
       label: "LinkedIn: start a new chat",
       description:
-        "Start a new LinkedIn DM. Provide one or more attendee provider_ids (LinkedIn member IDs) and the opening message. Defaults to the Sales Navigator messaging API when available. Blocked outside working hours. Note: `subject` is only rendered when sending as InMail (searchType='classic' + inmail=true); LinkedIn silently drops it for direct messages.",
+        "Start a new LinkedIn DM to one or more recipients (attendee provider_ids). Defaults to the Sales Navigator messaging API on SN/Recruiter accounts, classic otherwise. Blocked outside working hours. Setting `inmail: true` forces the classic InMail path regardless of searchType (InMail doesn't exist on the SN messaging API). `subject` is only rendered for InMails; LinkedIn silently drops it for regular DMs.",
       parameters: StartChatParams,
       execute: async (_id, params) => {
-        const effectiveType = params.searchType ?? (salesLike ? "sales_navigator" : "classic");
+        // InMail only exists on the classic messaging path; if the caller asked
+        // for it on a SN-default account we must route through classic or the
+        // inmail flag is silently dropped.
+        const requestedType = params.searchType ?? (salesLike ? "sales_navigator" : "classic");
+        const effectiveType = params.inmail ? "classic" : requestedType;
         const text = normalizeOutboundText(params.text);
         const subject = params.subject ? normalizeOutboundText(params.subject) : undefined;
         const base = compact({

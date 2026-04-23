@@ -66,7 +66,7 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
       name: "linkedin_send_invitation",
       label: "LinkedIn: send connection invitation",
       description:
-        "Send a LinkedIn connection request to a user. 'providerId' is the LinkedIn provider_id (member URN) of the target. Optional 'message' is capped at 300 characters (LinkedIn limit). Blocked outside working hours, ≥90 s spacing between sends, daily/weekly/monthly caps apply.",
+        "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps.",
       parameters: SendInvitationParams,
       execute: async (_id, params) => {
         // 300-char cap is enforced by the JSON schema (`maxLength`), so input

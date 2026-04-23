@@ -23,7 +23,7 @@ export function registerUsageTools(api: OpenClawPluginApi, ctx: ToolContext): vo
       name: "linkedin_usage_report",
       label: "LinkedIn: usage report",
       description:
-        "Return the current rate-limit state for the connected LinkedIn account: per-category usage today / last 7 days / last 30 days (split into real `calls` vs. 429/500 `penalty`), remaining budgets, minimum-spacing countdowns, per-tool call counts for today, polling cooldowns per tool, working-hours status, and a ring of the most recent usage events. Use this to plan bursts or diagnose why another linkedin_* tool is blocked. Read-only, no guardrails, no budget cost.",
+        "Diagnose why a linkedin_* tool is blocked, or plan a burst against the daily/weekly/monthly caps. Returns per-category usage, remaining budgets, active spacing and polling cooldowns, working-hours status, and recent usage events. Read-only, no budget cost.",
       parameters: UsageReportParams,
       execute: async (_id, params) => {
         const report = ctx.limiter.report({ eventLimit: params.eventLimit });

@@ -73,6 +73,7 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
     defineTool({
       name: "linkedin_send_invitation",
       label: "LinkedIn: send connection invitation",
+      executionMode: "sequential",
       description:
         "Send a LinkedIn connection request. `providerId` is the target's provider_id (member URN) — get it from linkedin_search result items, linkedin_get_profile, or linkedin_list_relations. Optional `message` is capped at 300 characters. Blocked outside working hours; writes are serialized and spaced ≥90 s apart with daily/weekly/monthly caps. By default the call waits up to 120 s for the spacing window and emits progress heartbeats every ~10 s (`details.status=\"waiting\"`, `secondsRemaining`, `readyAt`) so harnesses keep the tool call alive; override via `waitSec` if you prefer fail-fast. Returns `{ object: 'UserInvitationSent', invitation_id }`.",
       parameters: SendInvitationParams,
@@ -158,6 +159,7 @@ export function registerInvitationTools(api: OpenClawPluginApi, ctx: ToolContext
     defineTool({
       name: "linkedin_handle_invitation",
       label: "LinkedIn: accept or decline a received invitation",
+      executionMode: "sequential",
       description:
         "Accept or decline a pending received invitation. Pass both `invitationId` (items[].id) and `sharedSecret` (items[].specifics.shared_secret) from the same linkedin_list_invitations_received item. Blocked outside working hours.",
       parameters: HandleInvitationParams,

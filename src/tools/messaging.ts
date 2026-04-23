@@ -167,6 +167,7 @@ export function registerMessagingTools(api: OpenClawPluginApi, ctx: ToolContext)
     defineTool({
       name: "linkedin_send_message",
       label: "LinkedIn: reply in a chat",
+      executionMode: "sequential",
       description:
         "Send a text message in an existing LinkedIn DM thread. Blocked outside working hours. Use linkedin_start_chat to initiate a new conversation. Returns `{ object: 'MessageSent', message_id }`.",
       parameters: SendMessageParams,
@@ -185,6 +186,7 @@ export function registerMessagingTools(api: OpenClawPluginApi, ctx: ToolContext)
     defineTool({
       name: "linkedin_start_chat",
       label: "LinkedIn: start a new chat",
+      executionMode: "sequential",
       description:
         "Start a new LinkedIn DM. Passing ONE attendee provider_id starts a 1-to-1 chat; passing multiple creates a single GROUP chat with all of them — for individual outreach to N people, call this tool N times. Defaults to the Sales Navigator messaging API on SN/Recruiter accounts, classic otherwise. Blocked outside working hours. Setting `inmail: true` forces the classic InMail path regardless of searchType (InMail doesn't exist on the SN messaging API). `subject` is only rendered for InMails; LinkedIn silently drops it for regular DMs. Returns `{ object: 'ChatStarted', chat_id, message_id }`.",
       parameters: StartChatParams,

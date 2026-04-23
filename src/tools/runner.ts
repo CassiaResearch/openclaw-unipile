@@ -151,6 +151,14 @@ export interface UnipileToolDefinition<TParameters extends TSchema> {
     signal?: AbortSignal,
     onUpdate?: ToolProgressCallback,
   ) => Promise<ToolResult>;
+  /**
+   * Per-tool execution mode forwarded to pi-agent-core's AgentTool. Set to
+   * "sequential" on write tools so the harness doesn't kick off the gate/jitter
+   * for a second write while the first is still in flight — cheap
+   * defense-in-depth on top of the limiter's own AsyncMutex, which remains the
+   * source of truth across harnesses and concurrent callers.
+   */
+  executionMode?: "sequential" | "parallel";
 }
 
 export function defineTool<TParameters extends TSchema>(

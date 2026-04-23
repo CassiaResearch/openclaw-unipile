@@ -116,6 +116,28 @@ describe("linkedin_search — compact projection", () => {
     expect((parsed as unknown as { cursor: string }).cursor).toBe("c1");
   });
 
+  it("sends account_id and api as QUERY parameters, not body fields", async () => {
+    // Regression: Unipile's /linkedin/search rejects with
+    //   400 {"path":"/account_id","message":"Required property"}
+    // when account_id is in the body. Matches linkedin_search_parameters,
+    // which puts account_id in the query and works.
+    const h = harness();
+    const tool = h.tools.get("linkedin_search")!;
+    await tool.execute("id-q", { keywords: "vp", searchType: "sales_navigator" });
+
+    const params = h.lastQuery.params as Record<string, string>;
+    expect(params.account_id).toBe("test-account");
+    expect(params.api).toBe("sales_navigator");
+
+    const body = h.lastQuery.body as Record<string, unknown>;
+    // Neither account_id nor api should be in the body — that's what caused
+    // Unipile to 400.
+    expect(body.account_id).toBeUndefined();
+    expect(body.api).toBeUndefined();
+    // The actual search content still goes in the body.
+    expect(body.keywords).toBe("vp");
+  });
+
   it("rejects non-linkedin URLs with errorCode='invalid_target'", async () => {
     const h = harness();
     const tool = h.tools.get("linkedin_search")!;

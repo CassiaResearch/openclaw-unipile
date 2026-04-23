@@ -175,13 +175,16 @@ export function registerSearchTools(api: OpenClawPluginApi, ctx: ToolContext): v
             body.category = params.category;
           }
         }
-        // Force api + account_id last so filters/url can't override them.
-        body.api = effectiveType;
-        body.account_id = cfg.accountId;
 
+        // Unipile's /linkedin/search expects account_id and api as QUERY
+        // parameters, not body fields (matches linkedin_search_parameters).
+        // Putting them in the body yields `400 /account_id Required property`.
+        // Build query last so filters/url can't override these.
         const query: Record<string, string> = {};
         if (params.limit !== undefined) query.limit = String(params.limit);
         if (params.cursor) query.cursor = params.cursor;
+        query.account_id = cfg.accountId;
+        query.api = effectiveType;
 
         // Reserve the largest plausible cost so concurrent searches can't
         // overshoot the daily cap: caller-requested `limit` if provided,

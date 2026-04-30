@@ -2,14 +2,17 @@
   "id": "openclaw-unipile",
   "name": "Unipile LinkedIn",
   "description": "LinkedIn automation via Unipile — messaging, connections, profile, Sales Navigator search. Hard-enforced daily quotas and human-like pacing to protect the connected account.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "pluginApi": "1.0",
   "skills": ["./skills"],
   "nonSecretAuthMarkers": ["accountId"],
   "configContracts": {
     "secretInputs": {
       "bundledDefaultEnabled": false,
-      "paths": [{ "path": "apiKey", "expected": "string" }]
+      "paths": [
+        { "path": "apiKey", "expected": "string" },
+        { "path": "dsn", "expected": "string" }
+      ]
     }
   },
   "configSchema": {
@@ -21,12 +24,34 @@
         "description": "Enable or disable the Unipile LinkedIn integration"
       },
       "dsn": {
-        "type": "string",
-        "description": "Unipile DSN URL (e.g. https://apiXX.unipile.com:443XX)"
+        "description": "Unipile DSN URL (e.g. https://apiXX.unipile.com:443XX) or a SecretRef object the host resolves before the plugin reads the value.",
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "properties": {
+              "source": { "type": "string" },
+              "provider": { "type": "string" },
+              "id": { "type": "string" }
+            },
+            "required": ["source", "provider", "id"]
+          }
+        ]
       },
       "apiKey": {
-        "type": "string",
-        "description": "Unipile API access token (sent as X-API-KEY)"
+        "description": "Unipile API access token (sent as X-API-KEY) or a SecretRef object the host resolves before the plugin reads the value.",
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "properties": {
+              "source": { "type": "string" },
+              "provider": { "type": "string" },
+              "id": { "type": "string" }
+            },
+            "required": ["source", "provider", "id"]
+          }
+        ]
       },
       "accountId": {
         "type": "string",

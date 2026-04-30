@@ -1,6 +1,6 @@
 {
   "name": "@copilotai/openclaw-unipile-plugin",
-  "version": "0.5.0",
+  "version": "0.7.0",
   "type": "module",
   "description": "OpenClaw Unipile LinkedIn plugin — messaging, connections, profile, Sales Navigator search",
   "keywords": [

@@ -87,25 +87,49 @@ const FlexibleBoolean = z.preprocess((v) => {
 }, z.boolean());
 
 /**
- * String field that trims whitespace and falls back to an env var when the
- * trimmed value is empty. Used for credentials that can come from either
- * plugin config or environment. Resolves to "" when neither is set —
- * missingCredential() surfaces that to the caller.
+ * Credential field that accepts:
+ *  - a plain string (trimmed),
+ *  - undefined / null / missing key (falls back to the named env var),
+ *  - a SecretRef object `{ source, provider, id }` — host gateways on
+ *    openclaw >= 2026.4.26 resolve SecretRefs to a plain string before
+ *    handing config to the plugin, so this branch is a defensive fallback
+ *    that surfaces "" (handled downstream by missingCredential()) when
+ *    an unresolved ref slips through.
+ *
+ * Resolves to "" when no source provides a value; missingCredential()
+ * surfaces that to the caller with a friendly error.
  */
-function envFallbackString(envVar: string) {
-  return z.preprocess((v) => {
-    const raw = typeof v === "string" ? v.trim() : "";
-    if (raw) return raw;
-    const env = process.env[envVar];
-    return typeof env === "string" ? env.trim() : "";
-  }, z.string());
+function credentialField(envVar: string) {
+  const SecretRefShape = z
+    .looseObject({
+      source: z.string(),
+      provider: z.string(),
+      id: z.string(),
+    })
+    .describe("SecretRef object resolved by the host gateway before reaching the plugin");
+
+  return z
+    .union([z.string(), SecretRefShape, z.null(), z.undefined()])
+    .optional()
+    .transform((v) => {
+      if (typeof v === "string") {
+        const trimmed = v.trim();
+        if (trimmed) return trimmed;
+      }
+      // Unresolved SecretRef: gateway should have resolved it; treat as missing.
+      // (We deliberately do not read the ref ourselves — secret resolution is the
+      // host's responsibility.)
+      const envValue = process.env[envVar]?.trim();
+      if (envValue) return envValue;
+      return "";
+    });
 }
 
 export const UnipileConfigSchema = z.object({
   enabled: FlexibleBoolean.default(true),
-  dsn: envFallbackString("UNIPILE_DSN"),
-  apiKey: envFallbackString("UNIPILE_API_KEY"),
-  accountId: envFallbackString("UNIPILE_ACCOUNT_ID"),
+  dsn: credentialField("UNIPILE_DSN"),
+  apiKey: credentialField("UNIPILE_API_KEY"),
+  accountId: credentialField("UNIPILE_ACCOUNT_ID"),
   accountTier: z.enum(["classic", "sales_navigator", "recruiter"]).default("sales_navigator"),
   limits: LimitsSchema,
   pacing: PacingSchema,

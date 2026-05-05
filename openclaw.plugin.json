@@ -6,6 +6,28 @@
   "pluginApi": "1.0",
   "skills": ["./skills"],
   "nonSecretAuthMarkers": ["accountId"],
+  "contracts": {
+    "tools": [
+      "linkedin_get_own_profile",
+      "linkedin_get_profile",
+      "linkedin_get_company",
+      "linkedin_search",
+      "linkedin_search_parameters",
+      "linkedin_list_chats",
+      "linkedin_list_chat_messages",
+      "linkedin_list_messages_from_attendee",
+      "linkedin_send_message",
+      "linkedin_start_chat",
+      "linkedin_send_invitation",
+      "linkedin_list_invitations_sent",
+      "linkedin_list_invitations_received",
+      "linkedin_handle_invitation",
+      "linkedin_cancel_invitation_sent",
+      "linkedin_list_relations",
+      "linkedin_usage_report",
+      "linkedin_check_budget"
+    ]
+  },
   "configContracts": {
     "secretInputs": {
       "bundledDefaultEnabled": false,

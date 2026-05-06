@@ -1,6 +1,6 @@
 {
   "name": "@copilotai/openclaw-unipile-plugin",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "type": "module",
   "description": "OpenClaw Unipile LinkedIn plugin — messaging, connections, profile, Sales Navigator search",
   "keywords": [
@@ -15,7 +15,7 @@
   "license": "MIT",
   "author": "Cassia Research",
   "files": [
-    "src",
+    "dist/**",
     "skills",
     "openclaw.plugin.json",
     "README.md",
@@ -23,10 +23,15 @@
   ],
   "openclaw": {
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.js"
+    ],
+    "runtimeExtensions": [
+      "./dist/index.js"
     ]
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
